@@ -38,6 +38,13 @@ if [[ ! -f "$CONFIG_DIR/dashboard.env" ]]; then
   echo "Criado $CONFIG_DIR/dashboard.env. Configure os tokens antes de iniciar o serviço."
 fi
 
+if [[ ! -f "$CONFIG_DIR/pve-instances.json" ]]; then
+  install -m 0640 "$APP_DIR/config/pve-instances.example.json" "$CONFIG_DIR/pve-instances.json"
+  echo "Criado $CONFIG_DIR/pve-instances.json. Configure as instâncias e tokens PVE."
+fi
+chown root:"$SERVICE_USER" "$CONFIG_DIR/pve-instances.json"
+chmod 0640 "$CONFIG_DIR/pve-instances.json"
+
 if [[ ! -f "$CONFIG_DIR/ip-overrides.json" ]]; then
   printf '{}\n' > "$CONFIG_DIR/ip-overrides.json"
 fi
@@ -51,6 +58,7 @@ systemctl enable proxmox-pbs-dashboard.service
 echo
 printf 'Próximos passos:\n'
 printf '1. Edite %s/dashboard.env\n' "$CONFIG_DIR"
-printf '2. Execute: systemctl restart proxmox-pbs-dashboard\n'
-printf '3. Consulte: systemctl status proxmox-pbs-dashboard\n'
-printf '4. Acesse: http://IP-DO-CONTAINER:8080\n'
+printf '2. Edite %s/pve-instances.json\n' "$CONFIG_DIR"
+printf '3. Execute: systemctl restart proxmox-pbs-dashboard\n'
+printf '4. Consulte: systemctl status proxmox-pbs-dashboard\n'
+printf '5. Acesse: http://IP-DO-CONTAINER:8080\n'
