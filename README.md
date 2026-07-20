@@ -38,7 +38,7 @@ Clone o repositório no container Ubuntu e execute:
 
 ```bash
 cd proxmox-pbs-dashboard
-sudo ./scripts/install.sh
+sudo bash scripts/install.sh
 sudo nano /etc/proxmox-pbs-dashboard/dashboard.env
 sudo systemctl restart proxmox-pbs-dashboard
 sudo systemctl status proxmox-pbs-dashboard
@@ -141,7 +141,7 @@ curl http://127.0.0.1:8080/health
 Atualização do código após `git pull`:
 
 ```bash
-sudo /opt/proxmox-pbs-dashboard/scripts/update.sh
+sudo bash /opt/proxmox-pbs-dashboard/scripts/update.sh
 ```
 
 ## Nginx opcional
