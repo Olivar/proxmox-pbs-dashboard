@@ -20,6 +20,8 @@ class BackupInfo(BaseModel):
 class VmInfo(BaseModel):
     vmid: int
     name: str
+    pve_id: str
+    pve_name: str
     node: str
     ip: str | None = None
     uptime_seconds: int = Field(default=0, ge=0)
@@ -31,6 +33,8 @@ class VmInfo(BaseModel):
 
 class SourceHealth(BaseModel):
     ok: bool
+    source_id: str | None = None
+    source_name: str | None = None
     error: str | None = None
 
 
@@ -39,5 +43,5 @@ class DashboardPayload(BaseModel):
     updated_at: datetime
     stale: bool = False
     vms: list[VmInfo]
-    pve: SourceHealth
+    pve: list[SourceHealth]
     pbs: SourceHealth

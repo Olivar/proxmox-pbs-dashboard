@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from app.config import Settings
+from app.config import PveInstance, Settings
 from app.ip_cache import IpCache
 from app.models import VmInfo
 from app.utils import format_uptime, pick, state_display
@@ -17,15 +17,16 @@ class ProxmoxError(RuntimeError):
 
 
 class ProxmoxClient:
-    def __init__(self, settings: Settings, ip_cache: IpCache) -> None:
+    def __init__(self, settings: Settings, instance: PveInstance, ip_cache: IpCache) -> None:
         self.settings = settings
+        self.instance = instance
         self.ip_cache = ip_cache
         self.client = httpx.AsyncClient(
-            base_url=settings.pve_base_url,
+            base_url=instance.base_url,
             timeout=settings.request_timeout_seconds,
-            verify=settings.pve_verify_tls,
+            verify=instance.verify_tls,
             headers={
-                "Authorization": f"PVEAPIToken={settings.pve_token_id}={settings.pve_token_secret}",
+                "Authorization": f"PVEAPIToken={instance.token_id}={instance.token_secret}",
                 "Accept": "application/json",
             },
         )
@@ -37,7 +38,7 @@ class ProxmoxClient:
     async def get_vms(self) -> list[VmInfo]:
         data = await self._get_json("/api2/json/cluster/resources", params={"type": "vm"})
         if not isinstance(data, list):
-            raise ProxmoxError("PVE retornou uma lista de VMs inválida")
+            raise ProxmoxError(f"{self.instance.name}: PVE retornou uma lista de VMs inválida")
 
         overrides = self.settings.load_ip_overrides()
         vms: list[VmInfo] = []
@@ -63,6 +64,8 @@ class ProxmoxClient:
             vm = VmInfo(
                 vmid=vmid,
                 name=str(item.get("name") or f"VM-{vmid}"),
+                pve_id=self.instance.id,
+                pve_name=self.instance.name,
                 node=node,
                 ip=fallback_ip,
                 uptime_seconds=max(0, uptime),
@@ -102,9 +105,9 @@ class ProxmoxClient:
             response.raise_for_status()
             payload = response.json()
         except (httpx.HTTPError, ValueError) as exc:
-            raise ProxmoxError(f"Falha ao consultar PVE: {exc}") from exc
+            raise ProxmoxError(f"Falha ao consultar {self.instance.name}: {exc}") from exc
         if not isinstance(payload, dict) or "data" not in payload:
-            raise ProxmoxError("Resposta inválida da API PVE")
+            raise ProxmoxError(f"Resposta inválida da API {self.instance.name}")
         return payload["data"]
 
 
