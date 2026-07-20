@@ -57,8 +57,15 @@ const filteredVms = () => {
   if (!state.payload) return [];
   const query = state.query.trim().toLocaleLowerCase("pt-BR");
   if (!query) return state.payload.vms;
-  return state.payload.vms.filter((vm) => [vm.name, vm.vmid, vm.ip, vm.node]
+  return state.payload.vms.filter((vm) => [vm.pve_name, vm.pve_id, vm.name, vm.vmid, vm.ip, vm.node]
     .some((value) => String(value ?? "").toLocaleLowerCase("pt-BR").includes(query)));
+};
+
+const sourceChip = (label, source) => {
+  const status = source.ok ? "ok" : "error";
+  const text = source.ok ? "online" : "erro";
+  const title = source.error ? ` title="${htmlEscape(source.error)}"` : "";
+  return `<span class="status-chip ${status}"${title}>${htmlEscape(label)}: ${text}</span>`;
 };
 
 const render = () => {
@@ -77,35 +84,30 @@ const render = () => {
   elements.vmTable.innerHTML = vms.length ? vms.map((vm) => `
     <tr>
       <td>${stateBadge(vm)}</td>
+      <td>${htmlEscape(vm.pve_name)}</td>
       <td><strong>${htmlEscape(vm.name)}</strong></td>
       <td>${htmlEscape(vm.vmid)}</td>
       <td>${htmlEscape(vm.ip || "Não disponível")}</td>
       <td>${htmlEscape(vm.uptime_display)}</td>
       <td>${htmlEscape(vm.node)}</td>
-    </tr>`).join("") : `<tr><td class="empty" colspan="6">Nenhuma VM encontrada.</td></tr>`;
+    </tr>`).join("") : `<tr><td class="empty" colspan="7">Nenhuma VM encontrada.</td></tr>`;
 
   elements.backupTable.innerHTML = vms.length ? vms.map((vm) => `
     <tr>
       <td>${backupBadge(vm.backup)}</td>
+      <td>${htmlEscape(vm.pve_name)}</td>
       <td><strong>${htmlEscape(vm.name)}</strong></td>
       <td>${htmlEscape(vm.vmid)}</td>
       <td>${formatDate(vm.backup.last_backup)}</td>
       <td>${htmlEscape(vm.backup.datastore || "—")}</td>
-    </tr>`).join("") : `<tr><td class="empty" colspan="5">Nenhuma VM encontrada.</td></tr>`;
+    </tr>`).join("") : `<tr><td class="empty" colspan="6">Nenhuma VM encontrada.</td></tr>`;
 
   const updatedAt = formatDate(state.payload.updated_at);
-  elements.lastUpdate.textContent = `${state.payload.stale ? "Dados em cache" : "Atualizado"}: ${updatedAt}`;
+  elements.lastUpdate.textContent = `${state.payload.stale ? "Dados parcialmente em cache" : "Atualizado"}: ${updatedAt}`;
   elements.sourceStatus.innerHTML = [
-    sourceChip("PVE", state.payload.pve),
+    ...state.payload.pve.map((source) => sourceChip(source.source_name || source.source_id || "PVE", source)),
     sourceChip("PBS", state.payload.pbs),
   ].join("");
-};
-
-const sourceChip = (label, source) => {
-  const status = source.ok ? "ok" : "error";
-  const text = source.ok ? "online" : "erro";
-  const title = source.error ? ` title="${htmlEscape(source.error)}"` : "";
-  return `<span class="status-chip ${status}"${title}>${label}: ${text}</span>`;
 };
 
 const loadDashboard = async (force = false) => {
