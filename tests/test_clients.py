@@ -55,10 +55,11 @@ async def test_pve_client_collects_vm_and_guest_ip(tmp_path: Path) -> None:
             ]}})
         return httpx.Response(404)
 
-    client = ProxmoxClient(settings, IpCache(settings.ip_cache_file))
+    instance = settings.load_pve_instances()[0]
+    client = ProxmoxClient(settings, instance, IpCache(settings.ip_cache_file))
     await client.client.aclose()
     client.client = httpx.AsyncClient(
-        base_url=settings.pve_base_url,
+        base_url=instance.base_url,
         transport=httpx.MockTransport(handler),
         headers={"Authorization": "PVEAPIToken=dashboard@pve!readonly=pve-secret"},
     )
@@ -69,6 +70,8 @@ async def test_pve_client_collects_vm_and_guest_ip(tmp_path: Path) -> None:
 
     assert len(vms) == 1
     assert vms[0].name == "SRV-ERP"
+    assert vms[0].pve_id == "pve"
+    assert vms[0].pve_name == "PVE"
     assert vms[0].ip == "192.168.10.20"
     assert vms[0].uptime_display == "1d 01h 01m"
     assert vms[0].state_display == "Ligado"
