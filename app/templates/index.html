@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-refresh-seconds="{{ refresh_seconds }}">
+  <main class="layout">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Monitoramento read-only</p>
+        <h1>{{ title }}</h1>
+        <p id="last-update" class="muted">Carregando dados...</p>
+      </div>
+      <div class="actions">
+        <label class="search-label" for="search">Pesquisar</label>
+        <input id="search" type="search" placeholder="Nome, VMID ou IP" autocomplete="off">
+        <button id="refresh" type="button">Atualizar</button>
+      </div>
+    </header>
+
+    <section id="source-status" class="source-status" aria-live="polite"></section>
+
+    <section class="metrics" aria-label="Resumo">
+      <article class="metric"><span>VMs</span><strong id="metric-total">—</strong></article>
+      <article class="metric"><span>Ligadas</span><strong id="metric-running">—</strong></article>
+      <article class="metric"><span>Desligadas</span><strong id="metric-stopped">—</strong></article>
+      <article class="metric"><span>Backup com falha</span><strong id="metric-backup-failed">—</strong></article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>Máquinas virtuais</h2>
+        <span id="vm-count" class="muted"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Estado</th>
+              <th>Nome</th>
+              <th>VMID</th>
+              <th>IP</th>
+              <th>Uptime</th>
+              <th>Nó</th>
+            </tr>
+          </thead>
+          <tbody id="vm-table"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>Backups no PBS</h2>
+        <span id="backup-count" class="muted"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Nome da VM</th>
+              <th>VMID</th>
+              <th>Último backup</th>
+              <th>Datastore</th>
+            </tr>
+          </thead>
+          <tbody id="backup-table"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <p id="error" class="error" role="alert" hidden></p>
+  </main>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
