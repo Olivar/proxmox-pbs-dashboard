@@ -5,8 +5,29 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class PveInstance(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
+    url: HttpUrl
+    token_id: str = Field(min_length=1)
+    token_secret: str = Field(min_length=1)
+    verify_tls: bool = True
+
+    @field_validator("id", "name", "token_id", "token_secret")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("value cannot be empty")
+        return value
+
+    @property
+    def base_url(self) -> str:
+        return str(self.url).rstrip("/")
 
 
 class Settings(BaseSettings):
@@ -24,9 +45,12 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
     max_parallel_guest_agent_requests: int = Field(default=8, ge=1, le=64)
 
-    pve_url: HttpUrl
-    pve_token_id: str
-    pve_token_secret: str
+    pve_instances_file: Path = Path("/etc/proxmox-pbs-dashboard/pve-instances.json")
+
+    # Compatibilidade com a configuração anterior de um único PVE.
+    pve_url: HttpUrl | None = None
+    pve_token_id: str | None = None
+    pve_token_secret: str | None = None
     pve_verify_tls: bool = True
 
     pbs_url: HttpUrl
@@ -41,17 +65,21 @@ class Settings(BaseSettings):
     ip_cache_file: Path = Path("/var/lib/proxmox-pbs-dashboard/ip-cache.json")
     excluded_interface_prefixes: str = "lo,docker,veth,br-,virbr,podman,cni,tun,tap,wg,tailscale,zt"
 
-    @field_validator("pve_token_id", "pve_token_secret", "pbs_token_id", "pbs_token_secret", "pbs_datastores")
+    @field_validator("pve_token_id", "pve_token_secret")
+    @classmethod
+    def strip_optional_secret(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @field_validator("pbs_token_id", "pbs_token_secret", "pbs_datastores")
     @classmethod
     def non_empty_secret(cls, value: str) -> str:
         value = value.strip()
         if not value:
             raise ValueError("value cannot be empty")
         return value
-
-    @property
-    def pve_base_url(self) -> str:
-        return str(self.pve_url).rstrip("/")
 
     @property
     def pbs_base_url(self) -> str:
@@ -65,8 +93,57 @@ class Settings(BaseSettings):
     def excluded_interfaces(self) -> tuple[str, ...]:
         return tuple(item.strip().lower() for item in self.excluded_interface_prefixes.split(",") if item.strip())
 
+    def load_pve_instances(self) -> list[PveInstance]:
+        if self.pve_instances_file.exists():
+            return _read_pve_instances(self.pve_instances_file)
+
+        if self.pve_url and self.pve_token_id and self.pve_token_secret:
+            return [
+                PveInstance(
+                    id="pve",
+                    name="PVE",
+                    url=self.pve_url,
+                    token_id=self.pve_token_id,
+                    token_secret=self.pve_token_secret,
+                    verify_tls=self.pve_verify_tls,
+                )
+            ]
+
+        raise ValueError(
+            f"Nenhuma instância PVE configurada. Crie {self.pve_instances_file} "
+            "ou defina PVE_URL, PVE_TOKEN_ID e PVE_TOKEN_SECRET."
+        )
+
     def load_ip_overrides(self) -> dict[int, str]:
         return _read_ip_map(self.ip_overrides_file)
+
+
+def _read_pve_instances(path: Path) -> list[PveInstance]:
+    try:
+        payload: Any = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError(f"Arquivo de instâncias PVE não encontrado: {path}") from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Não foi possível ler o arquivo de instâncias PVE {path}: {exc}") from exc
+
+    if not isinstance(payload, list) or not payload:
+        raise ValueError(f"O arquivo {path} deve conter uma lista JSON não vazia")
+
+    instances: list[PveInstance] = []
+    seen_ids: set[str] = set()
+    for index, item in enumerate(payload, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"Instância PVE #{index} inválida: esperado objeto JSON")
+        try:
+            instance = PveInstance.model_validate(item)
+        except Exception as exc:
+            raise ValueError(f"Instância PVE #{index} inválida: {exc}") from exc
+        normalized_id = instance.id.casefold()
+        if normalized_id in seen_ids:
+            raise ValueError(f"ID de instância PVE duplicado: {instance.id}")
+        seen_ids.add(normalized_id)
+        instances.append(instance)
+    return instances
 
 
 def _read_ip_map(path: Path) -> dict[int, str]:
