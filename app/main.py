@@ -35,9 +35,12 @@ async def refresh_loop(service: DashboardService, interval: int) -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     ip_cache = IpCache(settings.ip_cache_file)
-    pve = ProxmoxClient(settings, ip_cache)
+    pve_clients = [
+        ProxmoxClient(settings, instance, ip_cache)
+        for instance in settings.load_pve_instances()
+    ]
     pbs = PbsClient(settings)
-    service = DashboardService(settings, pve, pbs)
+    service = DashboardService(settings, pve_clients, pbs)
     app.state.settings = settings
     app.state.service = service
     task = asyncio.create_task(refresh_loop(service, settings.refresh_seconds))
@@ -47,7 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
-        await pve.close()
+        await asyncio.gather(*(client.close() for client in pve_clients), return_exceptions=True)
         await pbs.close()
 
 
@@ -109,8 +112,8 @@ async def health(request: Request) -> dict[str, object]:
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {
-        "ok": payload.pve.ok,
-        "pve": payload.pve.model_dump(),
+        "ok": all(source.ok for source in payload.pve) and payload.pbs.ok,
+        "pve": [source.model_dump() for source in payload.pve],
         "pbs": payload.pbs.model_dump(),
         "updated_at": payload.updated_at,
         "stale": payload.stale,
