@@ -1,0 +1,26 @@
+[
+  {
+    "id": "pve01",
+    "name": "PVE Principal",
+    "url": "https://10.0.0.11:8006",
+    "token_id": "dashboard@pve!readonly",
+    "token_secret": "SUBSTITUA",
+    "verify_tls": false
+  },
+  {
+    "id": "pve02",
+    "name": "PVE Secundário",
+    "url": "https://10.0.0.12:8006",
+    "token_id": "dashboard@pve!readonly",
+    "token_secret": "SUBSTITUA",
+    "verify_tls": false
+  },
+  {
+    "id": "pve03",
+    "name": "PVE Terceiro",
+    "url": "https://10.0.0.13:8006",
+    "token_id": "dashboard@pve!readonly",
+    "token_secret": "SUBSTITUA",
+    "verify_tls": false
+  }
+]
