@@ -1,0 +1,24 @@
+[Unit]
+Description=Proxmox PBS Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proxmox-dashboard
+Group=proxmox-dashboard
+WorkingDirectory=/opt/proxmox-pbs-dashboard
+EnvironmentFile=/etc/proxmox-pbs-dashboard/dashboard.env
+ExecStart=/opt/proxmox-pbs-dashboard/.venv/bin/uvicorn app.main:app --host ${LISTEN_HOST} --port ${LISTEN_PORT} --workers 1 --proxy-headers
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/proxmox-pbs-dashboard
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
