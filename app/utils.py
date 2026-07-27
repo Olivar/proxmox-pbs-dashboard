@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -36,7 +36,7 @@ def state_display(status: str | None) -> tuple[str, str]:
 
 def utc_from_epoch(value: Any) -> datetime | None:
     try:
-        return datetime.fromtimestamp(int(value), tz=UTC)
+        return datetime.fromtimestamp(int(value), tz=timezone.utc)
     except (TypeError, ValueError, OSError):
         return None
 
