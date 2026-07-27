@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.config import Settings
 from app.models import BackupInfo, DashboardPayload, SourceHealth, VmInfo
@@ -21,86 +21,51 @@ class DashboardService:
         self._expires_at: datetime | None = None
 
     async def get_dashboard(self, force: bool = False) -> DashboardPayload:
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         if not force and self._cached and self._expires_at and now < self._expires_at:
             return self._cached
-
         async with self._lock:
-            now = datetime.now(UTC)
+            now = datetime.now(timezone.utc)
             if not force and self._cached and self._expires_at and now < self._expires_at:
                 return self._cached
             return await self._refresh(now)
 
     async def _refresh(self, now: datetime) -> DashboardPayload:
-        results = await asyncio.gather(
-            *(client.get_vms() for client in self.pve),
-            self.pbs.get_backups(),
-            return_exceptions=True,
-        )
-        pve_results = results[:-1]
-        pbs_result = results[-1]
-
+        results = await asyncio.gather(*(client.get_vms() for client in self.pve), self.pbs.get_backups(), return_exceptions=True)
+        pve_results, pbs_result = results[:-1], results[-1]
         cached_by_source: dict[str, list[VmInfo]] = {}
         if self._cached:
             for vm in self._cached.vms:
                 cached_by_source.setdefault(vm.pve_id, []).append(vm.model_copy(deep=True))
-
         vms: list[VmInfo] = []
         pve_health: list[SourceHealth] = []
         pve_errors: list[str] = []
         successful_sources = 0
-
         for client, result in zip(self.pve, pve_results, strict=True):
             if isinstance(result, Exception):
                 error = str(result)
                 pve_errors.append(error)
-                pve_health.append(
-                    SourceHealth(
-                        ok=False,
-                        source_id=client.instance.id,
-                        source_name=client.instance.name,
-                        error=error,
-                    )
-                )
+                pve_health.append(SourceHealth(ok=False, source_id=client.instance.id, source_name=client.instance.name, error=error))
                 vms.extend(cached_by_source.get(client.instance.id, []))
                 continue
-
             successful_sources += 1
-            pve_health.append(
-                SourceHealth(
-                    ok=True,
-                    source_id=client.instance.id,
-                    source_name=client.instance.name,
-                )
-            )
+            pve_health.append(SourceHealth(ok=True, source_id=client.instance.id, source_name=client.instance.name))
             vms.extend(result)
-
         if successful_sources == 0 and not vms:
             raise ProxmoxError("; ".join(pve_errors) or "Nenhuma instância PVE respondeu")
-
         pbs_health = SourceHealth(ok=True, source_id="pbs", source_name="PBS")
         if isinstance(pbs_result, Exception):
-            pbs_health = SourceHealth(
-                ok=False,
-                source_id="pbs",
-                source_name="PBS",
-                error=str(pbs_result),
-            )
+            pbs_health = SourceHealth(ok=False, source_id="pbs", source_name="PBS", error=str(pbs_result))
             backups = self._cached_backups()
         else:
             backups = pbs_result
-
         for vm in vms:
-            vm.backup = backups.get(
-                vm.vmid,
-                BackupInfo(status="missing", detail="Nenhum snapshot localizado"),
-            ).model_copy(deep=True)
-
+            vm.backup = backups.get(vm.vmid, BackupInfo(status="missing", detail="Nenhum snapshot localizado")).model_copy(deep=True)
         payload = DashboardPayload(
             title=self.settings.dashboard_title,
             updated_at=now,
             stale=any(not source.ok for source in pve_health) or not pbs_health.ok,
-            vms=sorted(vms, key=lambda vm: (vm.pve_name.casefold(), vm.name.casefold(), vm.vmid)),
+            vms=sorted(vms, key=lambda vm: (vm.pve_name.casefold(), vm.kind, vm.name.casefold(), vm.vmid)),
             pve=pve_health,
             pbs=pbs_health,
         )
