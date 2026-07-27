@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
@@ -46,18 +46,19 @@ class PbsClient:
         errors: list[str] = []
 
         for datastore in self.settings.datastore_names:
-            try:
-                rows = await self._get_json(
-                    f"/api2/json/admin/datastore/{quote(datastore, safe='')}/snapshots",
-                    params={"backup-type": "vm"},
-                )
-            except PbsError as exc:
-                errors.append(f"{datastore}: {exc}")
-                continue
-            if not isinstance(rows, list):
-                errors.append(f"{datastore}: resposta de snapshots inválida")
-                continue
-            self._merge_snapshots(snapshots, datastore, rows)
+            for backup_type in ("vm", "ct"):
+                try:
+                    rows = await self._get_json(
+                        f"/api2/json/admin/datastore/{quote(datastore, safe='')}/snapshots",
+                        params={"backup-type": backup_type},
+                    )
+                except PbsError as exc:
+                    errors.append(f"{datastore}/{backup_type}: {exc}")
+                    continue
+                if not isinstance(rows, list):
+                    errors.append(f"{datastore}/{backup_type}: resposta de snapshots inválida")
+                    continue
+                self._merge_snapshots(snapshots, datastore, rows)
 
         if errors and not snapshots:
             raise PbsError("; ".join(errors))
@@ -84,7 +85,7 @@ class PbsClient:
             if not isinstance(row, dict):
                 continue
             backup_type = str(pick(row, "backup-type", "backup_type", default="")).lower()
-            if backup_type and backup_type != "vm":
+            if backup_type and backup_type not in {"vm", "ct"}:
                 continue
             try:
                 vmid = int(pick(row, "backup-id", "backup_id"))
@@ -115,7 +116,7 @@ class PbsClient:
 
 
 _VM_PATTERNS = (
-    re.compile(r"(?:^|[^a-z0-9])vm[/\s:_-]+(?P<vmid>\d+)(?:[^0-9]|$)", re.IGNORECASE),
+    re.compile(r"(?:^|[^a-z0-9])(?:vm|ct)[/\s:_-]+(?P<vmid>\d+)(?:[^0-9]|$)", re.IGNORECASE),
     re.compile(r"(?:backup-id|backup_id|vmid)[=:/\s]+(?P<vmid>\d+)", re.IGNORECASE),
 )
 

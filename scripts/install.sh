@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ ${EUID} -ne 0 ]]; then
-  echo "Execute como root: sudo bash scripts/install.sh" >&2
+  echo "Execute como root: sudo ./scripts/install.sh" >&2
   exit 1
 fi
 
@@ -34,22 +34,31 @@ python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 
 if [[ ! -f "$CONFIG_DIR/dashboard.env" ]]; then
-  install -m 0600 "$APP_DIR/.env.example" "$CONFIG_DIR/dashboard.env"
+  install -m 0640 "$APP_DIR/.env.example" "$CONFIG_DIR/dashboard.env"
   echo "Criado $CONFIG_DIR/dashboard.env. Configure os tokens antes de iniciar o serviço."
 fi
+chown root:"$SERVICE_USER" "$CONFIG_DIR/dashboard.env"
+chmod 0640 "$CONFIG_DIR/dashboard.env"
 
-if [[ ! -f "$CONFIG_DIR/pve-instances.json" ]]; then
+if [[ ! -f "$CONFIG_DIR/pve-instances.json" && -f "$APP_DIR/config/pve-instances.example.json" ]]; then
   install -m 0640 "$APP_DIR/config/pve-instances.example.json" "$CONFIG_DIR/pve-instances.json"
-  echo "Criado $CONFIG_DIR/pve-instances.json. Configure as instâncias e tokens PVE."
 fi
-chown root:"$SERVICE_USER" "$CONFIG_DIR/pve-instances.json"
-chmod 0640 "$CONFIG_DIR/pve-instances.json"
+if [[ -f "$CONFIG_DIR/pve-instances.json" ]]; then
+  chown root:"$SERVICE_USER" "$CONFIG_DIR/pve-instances.json"
+  chmod 0640 "$CONFIG_DIR/pve-instances.json"
+fi
 
 if [[ ! -f "$CONFIG_DIR/ip-overrides.json" ]]; then
   printf '{}\n' > "$CONFIG_DIR/ip-overrides.json"
 fi
 chown root:"$SERVICE_USER" "$CONFIG_DIR/ip-overrides.json"
 chmod 0640 "$CONFIG_DIR/ip-overrides.json"
+
+if [[ ! -f "$STATE_DIR/notes.json" ]]; then
+  printf '{}\n' > "$STATE_DIR/notes.json"
+fi
+chown "$SERVICE_USER":"$SERVICE_USER" "$STATE_DIR/notes.json"
+chmod 0640 "$STATE_DIR/notes.json"
 
 install -m 0644 "$APP_DIR/deploy/proxmox-pbs-dashboard.service" /etc/systemd/system/proxmox-pbs-dashboard.service
 systemctl daemon-reload

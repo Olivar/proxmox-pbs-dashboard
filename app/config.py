@@ -31,12 +31,7 @@ class PveInstance(BaseModel):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore")
 
     dashboard_title: str = "Proxmox / PBS"
     listen_host: str = "0.0.0.0"
@@ -44,15 +39,11 @@ class Settings(BaseSettings):
     refresh_seconds: int = Field(default=60, ge=15, le=3600)
     request_timeout_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
     max_parallel_guest_agent_requests: int = Field(default=8, ge=1, le=64)
-
     pve_instances_file: Path = Path("/etc/proxmox-pbs-dashboard/pve-instances.json")
-
-    # Compatibilidade com a configuração anterior de um único PVE.
     pve_url: HttpUrl | None = None
     pve_token_id: str | None = None
     pve_token_secret: str | None = None
     pve_verify_tls: bool = True
-
     pbs_url: HttpUrl
     pbs_token_id: str
     pbs_token_secret: str
@@ -60,9 +51,9 @@ class Settings(BaseSettings):
     pbs_node: str = "localhost"
     pbs_verify_tls: bool = True
     pbs_task_limit: int = Field(default=500, ge=50, le=5000)
-
     ip_overrides_file: Path = Path("/etc/proxmox-pbs-dashboard/ip-overrides.json")
     ip_cache_file: Path = Path("/var/lib/proxmox-pbs-dashboard/ip-cache.json")
+    notes_file: Path = Path("/var/lib/proxmox-pbs-dashboard/notes.json")
     excluded_interface_prefixes: str = "lo,docker,veth,br-,virbr,podman,cni,tun,tap,wg,tailscale,zt"
 
     @field_validator("pve_token_id", "pve_token_secret")
@@ -96,23 +87,9 @@ class Settings(BaseSettings):
     def load_pve_instances(self) -> list[PveInstance]:
         if self.pve_instances_file.exists():
             return _read_pve_instances(self.pve_instances_file)
-
         if self.pve_url and self.pve_token_id and self.pve_token_secret:
-            return [
-                PveInstance(
-                    id="pve",
-                    name="PVE",
-                    url=self.pve_url,
-                    token_id=self.pve_token_id,
-                    token_secret=self.pve_token_secret,
-                    verify_tls=self.pve_verify_tls,
-                )
-            ]
-
-        raise ValueError(
-            f"Nenhuma instância PVE configurada. Crie {self.pve_instances_file} "
-            "ou defina PVE_URL, PVE_TOKEN_ID e PVE_TOKEN_SECRET."
-        )
+            return [PveInstance(id="pve", name="PVE", url=self.pve_url, token_id=self.pve_token_id, token_secret=self.pve_token_secret, verify_tls=self.pve_verify_tls)]
+        raise ValueError(f"Nenhuma instância PVE configurada. Crie {self.pve_instances_file} ou defina PVE_URL, PVE_TOKEN_ID e PVE_TOKEN_SECRET.")
 
     def load_ip_overrides(self) -> dict[int, str]:
         return _read_ip_map(self.ip_overrides_file)
@@ -125,19 +102,14 @@ def _read_pve_instances(path: Path) -> list[PveInstance]:
         raise ValueError(f"Arquivo de instâncias PVE não encontrado: {path}") from exc
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Não foi possível ler o arquivo de instâncias PVE {path}: {exc}") from exc
-
     if not isinstance(payload, list) or not payload:
         raise ValueError(f"O arquivo {path} deve conter uma lista JSON não vazia")
-
     instances: list[PveInstance] = []
     seen_ids: set[str] = set()
     for index, item in enumerate(payload, start=1):
         if not isinstance(item, dict):
             raise ValueError(f"Instância PVE #{index} inválida: esperado objeto JSON")
-        try:
-            instance = PveInstance.model_validate(item)
-        except Exception as exc:
-            raise ValueError(f"Instância PVE #{index} inválida: {exc}") from exc
+        instance = PveInstance.model_validate(item)
         normalized_id = instance.id.casefold()
         if normalized_id in seen_ids:
             raise ValueError(f"ID de instância PVE duplicado: {instance.id}")
@@ -149,14 +121,10 @@ def _read_pve_instances(path: Path) -> list[PveInstance]:
 def _read_ip_map(path: Path) -> dict[int, str]:
     try:
         payload: Any = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
         return {}
-    except (OSError, json.JSONDecodeError):
-        return {}
-
     if not isinstance(payload, dict):
         return {}
-
     result: dict[int, str] = {}
     for key, value in payload.items():
         try:

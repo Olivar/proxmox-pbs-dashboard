@@ -9,6 +9,7 @@ import httpx
 from app.config import PveInstance, Settings
 from app.ip_cache import IpCache
 from app.models import VmInfo
+from app.note_store import NoteStore
 from app.utils import format_uptime, pick, state_display
 
 
@@ -17,10 +18,11 @@ class ProxmoxError(RuntimeError):
 
 
 class ProxmoxClient:
-    def __init__(self, settings: Settings, instance: PveInstance, ip_cache: IpCache) -> None:
+    def __init__(self, settings: Settings, instance: PveInstance, ip_cache: IpCache, notes: NoteStore) -> None:
         self.settings = settings
         self.instance = instance
         self.ip_cache = ip_cache
+        self.notes = notes
         self.client = httpx.AsyncClient(
             base_url=instance.base_url,
             timeout=settings.request_timeout_seconds,
@@ -38,20 +40,18 @@ class ProxmoxClient:
     async def get_vms(self) -> list[VmInfo]:
         data = await self._get_json("/api2/json/cluster/resources", params={"type": "vm"})
         if not isinstance(data, list):
-            raise ProxmoxError(f"{self.instance.name}: PVE retornou uma lista de VMs inválida")
+            raise ProxmoxError(f"{self.instance.name}: PVE retornou uma lista de guests inválida")
 
         overrides = self.settings.load_ip_overrides()
-        vms: list[VmInfo] = []
+        guests: list[VmInfo] = []
         pending_ip: list[tuple[VmInfo, asyncio.Task[str | None]]] = []
 
         for item in data:
             if not isinstance(item, dict):
                 continue
-            if str(item.get("type", "")).lower() != "qemu":
+            kind = str(item.get("type", "")).lower()
+            if kind not in {"qemu", "lxc"} or int(item.get("template") or 0) == 1:
                 continue
-            if int(item.get("template") or 0) == 1:
-                continue
-
             try:
                 vmid = int(item["vmid"])
             except (KeyError, TypeError, ValueError):
@@ -61,40 +61,51 @@ class ProxmoxClient:
             state, display = state_display(str(item.get("status") or ""))
             uptime = int(item.get("uptime") or 0) if state == "running" else 0
             fallback_ip = overrides.get(vmid) or self.ip_cache.get(vmid)
-            vm = VmInfo(
+            guest = VmInfo(
                 vmid=vmid,
-                name=str(item.get("name") or f"VM-{vmid}"),
+                name=str(item.get("name") or f"Guest-{vmid}"),
+                kind=kind,
+                kind_display="VM" if kind == "qemu" else "CT",
                 pve_id=self.instance.id,
                 pve_name=self.instance.name,
+                pve_url=self.instance.base_url,
                 node=node,
                 ip=fallback_ip,
+                note=self.notes.get(self.instance.id, vmid),
                 uptime_seconds=max(0, uptime),
                 uptime_display=format_uptime(uptime),
                 state=state,
                 state_display=display,
             )
-            vms.append(vm)
+            guests.append(guest)
 
             if state == "running" and node:
-                pending_ip.append((vm, asyncio.create_task(self._get_guest_ip(node, vmid))))
+                resolver = self._get_qemu_ip(node, vmid) if kind == "qemu" else self._get_lxc_ip(node, vmid)
+                pending_ip.append((guest, asyncio.create_task(resolver)))
 
-        for vm, task in pending_ip:
+        for guest, task in pending_ip:
             try:
                 resolved_ip = await task
             except Exception:
                 resolved_ip = None
             if resolved_ip:
-                vm.ip = resolved_ip
-                self.ip_cache.set(vm.vmid, resolved_ip)
+                guest.ip = resolved_ip
+                self.ip_cache.set(guest.vmid, resolved_ip)
 
-        return sorted(vms, key=lambda vm: (vm.name.casefold(), vm.vmid))
+        return sorted(guests, key=lambda guest: (guest.name.casefold(), guest.vmid))
 
-    async def _get_guest_ip(self, node: str, vmid: int) -> str | None:
+    async def _get_qemu_ip(self, node: str, vmid: int) -> str | None:
         async with self._agent_semaphore:
             try:
-                data = await self._get_json(
-                    f"/api2/json/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces"
-                )
+                data = await self._get_json(f"/api2/json/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces")
+            except ProxmoxError:
+                return None
+        return select_guest_ip(data, self.settings.excluded_interfaces)
+
+    async def _get_lxc_ip(self, node: str, vmid: int) -> str | None:
+        async with self._agent_semaphore:
+            try:
+                data = await self._get_json(f"/api2/json/nodes/{node}/lxc/{vmid}/interfaces")
             except ProxmoxError:
                 return None
         return select_guest_ip(data, self.settings.excluded_interfaces)
@@ -122,12 +133,13 @@ def select_guest_ip(data: Any, excluded_prefixes: tuple[str, ...]) -> str | None
     for interface in interfaces:
         if not isinstance(interface, dict):
             continue
-        name = str(pick(interface, "name", "interface", default="")).lower()
+        name = str(pick(interface, "name", "interface", "ifname", default="")).lower()
         if any(name.startswith(prefix) for prefix in excluded_prefixes):
             continue
         addresses = pick(interface, "ip-addresses", "ip_addresses", "addresses", default=[])
-        if not isinstance(addresses, list):
-            continue
+        if not isinstance(addresses, list) or not addresses:
+            raw_inet = pick(interface, "inet", "ip", default=None)
+            addresses = [{"address": raw_inet.split("/", 1)[0]}] if isinstance(raw_inet, str) else []
         for address in addresses:
             if not isinstance(address, dict):
                 continue
@@ -135,15 +147,14 @@ def select_guest_ip(data: Any, excluded_prefixes: tuple[str, ...]) -> str | None
             if not isinstance(raw_ip, str):
                 continue
             try:
-                ip = ipaddress.ip_address(raw_ip.split("%", 1)[0])
+                ip = ipaddress.ip_address(raw_ip.split("%", 1)[0].split("/", 1)[0])
             except ValueError:
                 continue
             if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
                 continue
-            if isinstance(ip, ipaddress.IPv4Address):
-                priority = 0 if ip.is_private else 1
-            else:
-                priority = 2 if ip.is_private else 3
+            priority = 0 if isinstance(ip, ipaddress.IPv4Address) and ip.is_private else 1
+            if isinstance(ip, ipaddress.IPv6Address):
+                priority += 2
             candidates.append((priority, str(ip)))
 
     if not candidates:

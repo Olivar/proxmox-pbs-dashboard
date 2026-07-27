@@ -5,8 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
-VmState = Literal["running", "stopped", "unknown"]
+GuestState = Literal["running", "stopped", "unknown"]
+GuestKind = Literal["qemu", "lxc"]
 BackupStatus = Literal["success", "failed", "running", "missing", "unknown"]
 
 
@@ -20,13 +20,17 @@ class BackupInfo(BaseModel):
 class VmInfo(BaseModel):
     vmid: int
     name: str
+    kind: GuestKind = "qemu"
+    kind_display: str = "VM"
     pve_id: str
     pve_name: str
+    pve_url: str
     node: str
     ip: str | None = None
+    note: str = ""
     uptime_seconds: int = Field(default=0, ge=0)
     uptime_display: str = "—"
-    state: VmState = "unknown"
+    state: GuestState = "unknown"
     state_display: str = "Desconhecido"
     backup: BackupInfo = Field(default_factory=BackupInfo)
 
@@ -45,3 +49,7 @@ class DashboardPayload(BaseModel):
     vms: list[VmInfo]
     pve: list[SourceHealth]
     pbs: SourceHealth
+
+
+class NoteUpdate(BaseModel):
+    note: str = Field(default="", max_length=4000)
