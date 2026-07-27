@@ -5,79 +5,98 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>{{ title }}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body data-refresh-seconds="{{ refresh_seconds }}">
   <main class="layout">
     <header class="page-header">
-      <div>
-        <p class="eyebrow">Monitoramento read-only</p>
-        <h1>{{ title }}</h1>
-        <p id="last-update" class="muted">Carregando dados...</p>
+      <div class="brand-block">
+        <span class="brand-icon" aria-hidden="true">⌕</span>
+        <div>
+          <p class="eyebrow">Monitoramento Proxmox</p>
+          <h1>{{ title }}</h1>
+          <p id="last-update" class="muted">Carregando dados...</p>
+        </div>
       </div>
-      <div class="actions">
-        <label class="search-label" for="search">Pesquisar</label>
-        <input id="search" type="search" placeholder="PVE, nome, VMID ou IP" autocomplete="off">
-        <button id="refresh" type="button">Atualizar</button>
-      </div>
+      <button id="refresh" type="button">Atualizar agora</button>
     </header>
 
     <section id="source-status" class="source-status" aria-live="polite"></section>
 
-    <section class="metrics" aria-label="Resumo">
-      <article class="metric"><span>VMs</span><strong id="metric-total">—</strong></article>
-      <article class="metric"><span>Ligadas</span><strong id="metric-running">—</strong></article>
-      <article class="metric"><span>Desligadas</span><strong id="metric-stopped">—</strong></article>
-      <article class="metric"><span>Backup com falha</span><strong id="metric-backup-failed">—</strong></article>
+    <nav class="tabs" aria-label="Seções do dashboard">
+      <button class="tab active" data-tab="monitoring" type="button">VMs e CTs</button>
+      <button class="tab" data-tab="backups" type="button">Backups</button>
+    </nav>
+
+    <section class="filters" aria-label="Filtros de visualização">
+      <label>Pesquisar<input id="search" type="search" placeholder="Nome, ID, IP, PVE, nó ou nota" autocomplete="off"></label>
+      <label>Tipo<select id="filter-kind"><option value="all">Todos</option><option value="qemu">VMs</option><option value="lxc">CTs</option></select></label>
+      <label>Estado<select id="filter-state"><option value="all">Todos</option><option value="running">Ligados</option><option value="stopped">Desligados</option></select></label>
+      <label>Backup<select id="filter-backup"><option value="all">Todos</option><option value="success">Sucesso</option><option value="failed">Erro</option><option value="missing">Sem backup</option><option value="running">Executando</option></select></label>
+      <label>PVE<select id="filter-pve"><option value="all">Todos</option></select></label>
+      <button id="clear-filters" class="secondary" type="button">Limpar</button>
     </section>
 
-    <section class="panel">
-      <div class="panel-heading">
-        <h2>Máquinas virtuais</h2>
-        <span id="vm-count" class="muted"></span>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Estado</th>
-              <th>PVE</th>
-              <th>Nome</th>
-              <th>VMID</th>
-              <th>IP</th>
-              <th>Uptime</th>
-              <th>Nó</th>
-            </tr>
-          </thead>
-          <tbody id="vm-table"></tbody>
-        </table>
-      </div>
+    <section id="monitoring-panel" class="tab-panel active">
+      <section class="metrics" aria-label="Resumo de monitoramento">
+        <article class="metric"><span>Total</span><strong id="metric-total">—</strong></article>
+        <article class="metric"><span>VMs</span><strong id="metric-vms">—</strong></article>
+        <article class="metric"><span>CTs</span><strong id="metric-cts">—</strong></article>
+        <article class="metric"><span>Ligados</span><strong id="metric-running">—</strong></article>
+        <article class="metric"><span>Desligados</span><strong id="metric-stopped">—</strong></article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading"><h2>Monitoramento de VMs e CTs</h2><span id="vm-count" class="muted"></span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Estado</th><th>Tipo</th><th>PVE</th><th>Nome</th><th>ID</th><th>IP</th><th>Uptime</th><th>Nó</th><th>Notas</th></tr></thead>
+            <tbody id="vm-table"></tbody>
+          </table>
+        </div>
+      </section>
     </section>
 
-    <section class="panel">
-      <div class="panel-heading">
-        <h2>Backups no PBS</h2>
-        <span id="backup-count" class="muted"></span>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Status</th>
-              <th>PVE</th>
-              <th>Nome da VM</th>
-              <th>VMID</th>
-              <th>Último backup</th>
-              <th>Datastore</th>
-            </tr>
-          </thead>
-          <tbody id="backup-table"></tbody>
-        </table>
-      </div>
+    <section id="backups-panel" class="tab-panel">
+      <section class="backup-overview">
+        <article class="panel chart-panel">
+          <div class="panel-heading"><h2>Distribuição dos backups</h2><span id="backup-chart-total" class="muted"></span></div>
+          <div class="chart-content">
+            <div id="backup-pie" class="pie" role="img" aria-label="Distribuição dos estados de backup"><span id="pie-center">—</span></div>
+            <div id="backup-legend" class="legend"></div>
+          </div>
+        </article>
+        <section class="metrics backup-metrics" aria-label="Resumo de backups">
+          <article class="metric"><span>Sucesso</span><strong id="metric-backup-success">—</strong></article>
+          <article class="metric"><span>Erro</span><strong id="metric-backup-failed">—</strong></article>
+          <article class="metric"><span>Sem backup</span><strong id="metric-backup-missing">—</strong></article>
+          <article class="metric"><span>Executando</span><strong id="metric-backup-running">—</strong></article>
+        </section>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading"><h2>Backups no PBS</h2><span id="backup-count" class="muted"></span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Status</th><th>Tipo</th><th>PVE</th><th>Nome</th><th>ID</th><th>Último backup</th><th>Datastore</th></tr></thead>
+            <tbody id="backup-table"></tbody>
+          </table>
+        </div>
+      </section>
     </section>
 
     <p id="error" class="error" role="alert" hidden></p>
   </main>
+
+  <dialog id="note-dialog">
+    <form id="note-form" method="dialog">
+      <div class="dialog-heading"><div><p class="eyebrow">Nota persistente</p><h2 id="note-title">Adicionar nota</h2></div><button id="note-close" class="icon-button" type="button" aria-label="Fechar">×</button></div>
+      <textarea id="note-text" maxlength="4000" rows="8" placeholder="Registre observações operacionais, responsáveis, pendências ou contexto..."></textarea>
+      <div class="dialog-actions"><button id="note-delete" class="danger-button" type="button">Excluir nota</button><button id="note-cancel" class="secondary" type="button">Cancelar</button><button type="submit">Salvar</button></div>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" hidden></div>
   <script src="/static/app.js" defer></script>
 </body>
 </html>
