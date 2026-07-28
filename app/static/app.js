@@ -1,6 +1,6 @@
 "use strict";
 
-const state = { payload: null, query: "", kind: "all", guestState: "all", backup: "all", pve: "all", tab: "monitoring", noteGuest: null };
+const state = { payload: null, query: "", kind: "all", guestState: "all", backup: "all", pve: "all", tab: "monitoring", noteGuest: null, actionGuest: null, action: null };
 const refreshSeconds = Number(document.body.dataset.refreshSeconds || 60);
 const $ = (id) => document.getElementById(id);
 const elements = {
@@ -8,7 +8,7 @@ const elements = {
   lastUpdate: $("last-update"), sourceStatus: $("source-status"), vmTable: $("vm-table"), backupTable: $("backup-table"), vmCount: $("vm-count"), backupCount: $("backup-count"), error: $("error"),
   metricTotal: $("metric-total"), metricVms: $("metric-vms"), metricCts: $("metric-cts"), metricRunning: $("metric-running"), metricStopped: $("metric-stopped"),
   metricBackupSuccess: $("metric-backup-success"), metricBackupFailed: $("metric-backup-failed"), metricBackupMissing: $("metric-backup-missing"), metricBackupRunning: $("metric-backup-running"),
-  pie: $("backup-pie"), pieCenter: $("pie-center"), legend: $("backup-legend"), chartTotal: $("backup-chart-total"), noteDialog: $("note-dialog"), noteForm: $("note-form"), noteTitle: $("note-title"), noteText: $("note-text"), noteDelete: $("note-delete"), toast: $("toast")
+  pie: $("backup-pie"), pieCenter: $("pie-center"), legend: $("backup-legend"), chartTotal: $("backup-chart-total"), noteDialog: $("note-dialog"), noteForm: $("note-form"), noteTitle: $("note-title"), noteText: $("note-text"), noteDelete: $("note-delete"), actionDialog: $("action-dialog"), actionForm: $("action-form"), actionTitle: $("action-title"), actionDescription: $("action-description"), actionUsername: $("action-username"), actionRealm: $("action-realm"), actionPassword: $("action-password"), actionOtp: $("action-otp"), actionSubmit: $("action-submit"), toast: $("toast")
 };
 
 const htmlEscape = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -22,6 +22,8 @@ const pveLink = (guest) => `<a class="table-link" href="${attrEscape(guest.pve_u
 const nodeLink = (guest) => `<a class="table-link" href="${attrEscape(guest.pve_url)}/#v1:0:=node/${encodeURIComponent(guest.node)}" target="_blank" rel="noopener noreferrer">${htmlEscape(guest.node)}</a>`;
 const ipButton = (guest) => guest.ip ? `<button class="copy-ip" type="button" data-copy-ip="${attrEscape(guest.ip)}" title="Copiar IP">${htmlEscape(guest.ip)}</button>` : `<button class="copy-ip unavailable" type="button" disabled>Indisponível</button>`;
 const noteButton = (guest) => `<button class="note-button ${guest.note ? "has-note" : ""}" type="button" data-note-pve="${attrEscape(guest.pve_id)}" data-note-vmid="${guest.vmid}" title="${attrEscape(guest.note || "Adicionar nota")}">${guest.note ? "Ver nota" : "Adicionar"}</button>`;
+const usageText = (guest) => `CPU: ${Number(guest.cpu_percent || 0)}% / RAM: ${Number(guest.ram_percent || 0)}%`;
+const actionButtons = (guest) => guest.state === "running" ? `<div class="action-buttons"><button class="secondary compact" type="button" data-guest-action="shutdown" data-pve="${attrEscape(guest.pve_id)}" data-vmid="${guest.vmid}">Desligar</button><button class="secondary compact" type="button" data-guest-action="reboot" data-pve="${attrEscape(guest.pve_id)}" data-vmid="${guest.vmid}">Reiniciar</button></div>` : guest.state === "stopped" ? `<button class="secondary compact" type="button" data-guest-action="start" data-pve="${attrEscape(guest.pve_id)}" data-vmid="${guest.vmid}">Iniciar</button>` : "—";
 
 const filteredGuests = () => {
   if (!state.payload) return [];
@@ -69,7 +71,7 @@ const render = () => {
   elements.vmCount.textContent = `${guests.length} de ${all.length}`;
   elements.backupCount.textContent = `${guests.length} itens`;
 
-  elements.vmTable.innerHTML = guests.length ? guests.map((g) => `<tr><td>${stateBadge(g)}</td><td><span class="type-badge">${htmlEscape(g.kind_display)}</span></td><td>${pveLink(g)}</td><td><strong>${htmlEscape(g.name)}</strong></td><td>${g.vmid}</td><td>${ipButton(g)}</td><td>${htmlEscape(g.uptime_display)}</td><td>${nodeLink(g)}</td><td>${noteButton(g)}</td></tr>`).join("") : `<tr><td class="empty" colspan="9">Nenhum item encontrado.</td></tr>`;
+  elements.vmTable.innerHTML = guests.length ? guests.map((g) => `<tr><td>${stateBadge(g)}</td><td><span class="type-badge">${htmlEscape(g.kind_display)}</span></td><td>${pveLink(g)}</td><td><strong>${htmlEscape(g.name)}</strong></td><td>${g.vmid}</td><td>${ipButton(g)}</td><td>${htmlEscape(usageText(g))}</td><td>${htmlEscape(g.uptime_display)}</td><td>${nodeLink(g)}</td><td>${noteButton(g)}</td><td>${actionButtons(g)}</td></tr>`).join("") : `<tr><td class="empty" colspan="11">Nenhum item encontrado.</td></tr>`;
   elements.backupTable.innerHTML = guests.length ? guests.map((g) => `<tr><td>${backupBadge(g.backup)}</td><td><span class="type-badge">${htmlEscape(g.kind_display)}</span></td><td>${pveLink(g)}</td><td><strong>${htmlEscape(g.name)}</strong></td><td>${g.vmid}</td><td>${formatDate(g.backup.last_backup)}</td><td>${htmlEscape(g.backup.datastore || "—")}</td></tr>`).join("") : `<tr><td class="empty" colspan="7">Nenhum item encontrado.</td></tr>`;
   renderChart(guests);
   elements.lastUpdate.textContent = `${state.payload.stale ? "Dados parciais/em cache" : "Atualizado"}: ${formatDate(state.payload.updated_at)}`;
@@ -102,6 +104,33 @@ const saveNote = async (note) => {
   showToast(payload.note ? "Nota salva" : "Nota excluída");
 };
 
+const actionLabels = { start: "Iniciar", shutdown: "Desligar", reboot: "Reiniciar" };
+const openAction = (pveId, vmid, action) => {
+  const guest = state.payload?.vms.find((g) => g.pve_id === pveId && g.vmid === Number(vmid));
+  if (!guest || !actionLabels[action]) return;
+  state.actionGuest = guest; state.action = action;
+  elements.actionTitle.textContent = `${actionLabels[action]} ${guest.kind_display} ${guest.vmid}`;
+  elements.actionDescription.textContent = `${actionLabels[action]} ${guest.kind_display} ${guest.vmid} — ${guest.name} em ${guest.pve_name}?`;
+  elements.actionPassword.value = ""; elements.actionOtp.value = "";
+  elements.actionDialog.showModal(); elements.actionUsername.focus();
+};
+
+const runAction = async () => {
+  const guest = state.actionGuest; const action = state.action;
+  if (!guest || !action) return;
+  elements.actionSubmit.disabled = true;
+  try {
+    const response = await fetch(`/api/guests/${encodeURIComponent(guest.pve_id)}/${encodeURIComponent(guest.node)}/${encodeURIComponent(guest.kind)}/${guest.vmid}/${action}`, {
+      method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ username: elements.actionUsername.value, realm: elements.actionRealm.value, password: elements.actionPassword.value, otp: elements.actionOtp.value || null }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+    elements.actionDialog.close(); elements.actionPassword.value = ""; elements.actionOtp.value = "";
+    showToast(`${actionLabels[action]} solicitado com sucesso`); await loadDashboard(true);
+  } finally { elements.actionSubmit.disabled = false; }
+};
+
 const loadDashboard = async (force = false) => {
   elements.refresh.disabled = true; elements.error.hidden = true;
   try {
@@ -117,11 +146,14 @@ document.querySelectorAll(".tab").forEach((button) => button.addEventListener("c
 [[elements.search, "query", "input"], [elements.kind, "kind", "change"], [elements.guestState, "guestState", "change"], [elements.backup, "backup", "change"], [elements.pve, "pve", "change"]].forEach(([element, key, eventName]) => element.addEventListener(eventName, (event) => { state[key] = event.target.value; render(); }));
 elements.clear.addEventListener("click", () => { state.query = ""; state.kind = state.guestState = state.backup = state.pve = "all"; elements.search.value = ""; elements.kind.value = elements.guestState.value = elements.backup.value = elements.pve.value = "all"; render(); });
 elements.refresh.addEventListener("click", () => loadDashboard(true));
-document.addEventListener("click", (event) => { const copy = event.target.closest("[data-copy-ip]"); if (copy) copyIp(copy.dataset.copyIp); const note = event.target.closest("[data-note-pve]"); if (note) openNote(note.dataset.notePve, note.dataset.noteVmid); });
+document.addEventListener("click", (event) => { const copy = event.target.closest("[data-copy-ip]"); if (copy) copyIp(copy.dataset.copyIp); const note = event.target.closest("[data-note-pve]"); if (note) openNote(note.dataset.notePve, note.dataset.noteVmid); const action = event.target.closest("[data-guest-action]"); if (action) openAction(action.dataset.pve, action.dataset.vmid, action.dataset.guestAction); });
 elements.noteForm.addEventListener("submit", async (event) => { event.preventDefault(); try { await saveNote(elements.noteText.value); } catch (error) { showToast(`Erro: ${error.message}`); } });
 elements.noteDelete.addEventListener("click", async () => { try { await saveNote(""); } catch (error) { showToast(`Erro: ${error.message}`); } });
 $("note-close").addEventListener("click", () => elements.noteDialog.close());
 $("note-cancel").addEventListener("click", () => elements.noteDialog.close());
+elements.actionForm.addEventListener("submit", async (event) => { event.preventDefault(); try { await runAction(); } catch (error) { showToast(`Erro: ${error.message}`); } });
+$("action-close").addEventListener("click", () => elements.actionDialog.close());
+$("action-cancel").addEventListener("click", () => elements.actionDialog.close());
 
 loadDashboard(false);
 window.setInterval(() => loadDashboard(false), Math.max(15, refreshSeconds) * 1000);
