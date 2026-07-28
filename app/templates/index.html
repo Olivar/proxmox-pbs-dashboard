@@ -51,7 +51,7 @@
         <div class="panel-heading"><h2>Monitoramento de VMs e CTs</h2><span id="vm-count" class="muted"></span></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Estado</th><th>Tipo</th><th>PVE</th><th>Nome</th><th>ID</th><th>IP</th><th>Uptime</th><th>Nó</th><th>Notas</th></tr></thead>
+            <thead><tr><th>Estado</th><th>Tipo</th><th>PVE</th><th>Nome</th><th>ID</th><th>IP</th><th>Uso</th><th>Uptime</th><th>Nó</th><th>Notas</th><th>Ações</th></tr></thead>
             <tbody id="vm-table"></tbody>
           </table>
         </div>
@@ -94,6 +94,18 @@
       <div class="dialog-heading"><div><p class="eyebrow">Nota persistente</p><h2 id="note-title">Adicionar nota</h2></div><button id="note-close" class="icon-button" type="button" aria-label="Fechar">×</button></div>
       <textarea id="note-text" maxlength="4000" rows="8" placeholder="Registre observações operacionais, responsáveis, pendências ou contexto..."></textarea>
       <div class="dialog-actions"><button id="note-delete" class="danger-button" type="button">Excluir nota</button><button id="note-cancel" class="secondary" type="button">Cancelar</button><button type="submit">Salvar</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="action-dialog">
+    <form id="action-form">
+      <div class="dialog-heading"><div><p class="eyebrow">Operação Proxmox</p><h2 id="action-title">Confirmar operação</h2></div><button id="action-close" class="icon-button" type="button" aria-label="Fechar">×</button></div>
+      <p id="action-description" class="muted"></p>
+      <label>Usuário<input id="action-username" required autocomplete="username" placeholder="usuario ou usuario@realm"></label>
+      <label>Realm<select id="action-realm"><option value="pam">pam</option><option value="pve">pve</option></select></label>
+      <label>Senha<input id="action-password" type="password" required autocomplete="current-password"></label>
+      <label>Código 2FA (opcional)<input id="action-otp" autocomplete="one-time-code"></label>
+      <div class="dialog-actions"><button id="action-cancel" class="secondary" type="button">Cancelar</button><button id="action-submit" type="submit">Executar</button></div>
     </form>
   </dialog>
   <div id="toast" class="toast" hidden></div>
