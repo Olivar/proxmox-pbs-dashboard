@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.ip_cache import IpCache
 from app.models import DashboardPayload, NoteUpdate
 from app.note_store import NoteStore
+from app.operations import router as operations_router
 from app.pbs import PbsClient
 from app.proxmox import ProxmoxClient
 from app.service import DashboardService
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.service = service
     app.state.notes = notes
+    app.state.pve_clients = {client.instance.id: client for client in pve_clients}
     task = asyncio.create_task(refresh_loop(service, settings.refresh_seconds))
     try:
         yield
@@ -56,6 +58,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Proxmox PBS Dashboard", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.include_router(operations_router)
 
 
 @app.middleware("http")

@@ -8,7 +8,7 @@ import httpx
 
 from app.config import PveInstance, Settings
 from app.ip_cache import IpCache
-from app.models import VmInfo
+from app.models import GuestActionRequest, VmInfo
 from app.note_store import NoteStore
 from app.utils import format_uptime, pick, state_display
 
@@ -72,6 +72,8 @@ class ProxmoxClient:
                 node=node,
                 ip=fallback_ip,
                 note=self.notes.get(self.instance.id, vmid),
+                cpu_percent=percent(item.get("cpu"), scale=100),
+                ram_percent=ratio_percent(item.get("mem"), item.get("maxmem")),
                 uptime_seconds=max(0, uptime),
                 uptime_display=format_uptime(uptime),
                 state=state,
@@ -109,6 +111,56 @@ class ProxmoxClient:
             except ProxmoxError:
                 return None
         return select_guest_ip(data, self.settings.excluded_interfaces)
+
+    async def operate_guest(
+        self, node: str, kind: str, vmid: int, action: str, credentials: GuestActionRequest
+    ) -> str | None:
+        if kind not in {"qemu", "lxc"} or action not in {"start", "shutdown", "reboot"}:
+            raise ProxmoxError("Operação de guest inválida")
+        username = credentials.username.strip()
+        realm = credentials.realm.strip()
+        if "@" not in username:
+            username = f"{username}@{realm}"
+        auth_data: dict[str, str] = {"username": username, "password": credentials.password}
+        if credentials.otp and credentials.otp.strip():
+            auth_data["otp"] = credentials.otp.strip()
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.instance.base_url,
+                timeout=self.settings.request_timeout_seconds,
+                verify=self.instance.verify_tls,
+                headers={"Accept": "application/json"},
+            ) as client:
+                auth = await client.post("/api2/json/access/ticket", data=auth_data)
+                auth.raise_for_status()
+                payload = auth.json()
+                data = payload.get("data") if isinstance(payload, dict) else None
+                if not isinstance(data, dict) or not data.get("ticket"):
+                    raise ProxmoxError("Autenticação recusada pelo PVE")
+                headers = {"CSRFPreventionToken": str(data.get("CSRFPreventionToken") or "")}
+                cookies = {"PVEAuthCookie": str(data["ticket"])}
+                response = await client.post(
+                    f"/api2/json/nodes/{node}/{kind}/{vmid}/status/{action}",
+                    headers=headers,
+                    cookies=cookies,
+                )
+                response.raise_for_status()
+                result = response.json()
+        except ProxmoxError:
+            raise
+        except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as exc:
+            detail = ""
+            if isinstance(exc, httpx.HTTPStatusError):
+                try:
+                    error_payload = exc.response.json()
+                    detail = str(error_payload.get("errors") or error_payload.get("data") or "")
+                except ValueError:
+                    detail = exc.response.text[:300]
+            suffix = f": {detail}" if detail else ""
+            raise ProxmoxError(f"Falha na operação em {self.instance.name}{suffix}") from exc
+        if not isinstance(result, dict) or "data" not in result:
+            raise ProxmoxError(f"Resposta inválida da API {self.instance.name}")
+        return str(result["data"]) if result["data"] else None
 
     async def _get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
         try:
@@ -161,3 +213,18 @@ def select_guest_ip(data: Any, excluded_prefixes: tuple[str, ...]) -> str | None
         return None
     candidates.sort(key=lambda item: (item[0], ipaddress.ip_address(item[1])))
     return candidates[0][1]
+
+
+def percent(value: Any, scale: int = 1) -> int:
+    try:
+        return max(0, min(100, round(float(value or 0) * scale)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def ratio_percent(value: Any, maximum: Any) -> int:
+    try:
+        total = float(maximum or 0)
+        return 0 if total <= 0 else max(0, min(100, round(float(value or 0) / total * 100)))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 0

@@ -28,6 +28,8 @@ class VmInfo(BaseModel):
     node: str
     ip: str | None = None
     note: str = ""
+    cpu_percent: int = Field(default=0, ge=0, le=100)
+    ram_percent: int = Field(default=0, ge=0, le=100)
     uptime_seconds: int = Field(default=0, ge=0)
     uptime_display: str = "—"
     state: GuestState = "unknown"
@@ -53,3 +55,16 @@ class DashboardPayload(BaseModel):
 
 class NoteUpdate(BaseModel):
     note: str = Field(default="", max_length=4000)
+
+
+class GuestActionRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    realm: str = Field(default="pam", min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=1024)
+    otp: str | None = Field(default=None, max_length=256)
+
+
+class GuestActionResponse(BaseModel):
+    ok: bool = True
+    action: Literal["start", "shutdown", "reboot"]
+    upid: str | None = None
