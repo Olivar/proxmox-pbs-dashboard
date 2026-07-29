@@ -73,7 +73,9 @@ class ProxmoxClient:
                 ip=fallback_ip,
                 note=self.notes.get(self.instance.id, vmid),
                 cpu_percent=percent(item.get("cpu"), scale=100),
+                cpu_total_cores=non_negative_float(pick(item, "maxcpu", "cpus", "cores", default=0)),
                 ram_percent=ratio_percent(item.get("mem"), item.get("maxmem")),
+                ram_total_bytes=non_negative_int(item.get("maxmem")),
                 uptime_seconds=max(0, uptime),
                 uptime_display=format_uptime(uptime),
                 state=state,
@@ -227,4 +229,18 @@ def ratio_percent(value: Any, maximum: Any) -> int:
         total = float(maximum or 0)
         return 0 if total <= 0 else max(0, min(100, round(float(value or 0) / total * 100)))
     except (TypeError, ValueError, ZeroDivisionError):
+        return 0
+
+
+def non_negative_float(value: Any) -> float:
+    try:
+        return max(0.0, float(value or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def non_negative_int(value: Any) -> int:
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError):
         return 0
