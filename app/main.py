@@ -102,8 +102,8 @@ async def authentication_and_headers(request: Request, call_next) -> Response:
     return response
 
 
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request) -> HTMLResponse | RedirectResponse:
+@app.get("/login", response_class=HTMLResponse, response_model=None)
+async def login_page(request: Request) -> Response:
     settings = request.app.state.settings
     if read_session(request, settings.dashboard_session_secret):
         return RedirectResponse("/", status_code=303)
