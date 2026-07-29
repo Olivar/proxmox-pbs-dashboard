@@ -1,1 +1,12 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#1565c0"><title>Entrar — {{ title }}</title><link rel="stylesheet" href="/static/style.css"></head><body class="auth-page"><main class="auth-card"><div class="auth-logo"><span class="material-symbol">visibility</span></div><h1>{{ title }}</h1><p class="muted">Acesso restrito</p><form id="login-form"><label>Usuário<input id="login-user" required autocomplete="username" autofocus></label><label>Senha<input id="login-password" type="password" required autocomplete="current-password"></label><button class="primary-button" type="submit">Entrar</button><p id="login-error" class="error" hidden></p></form></main><script src="/static/login.js" defer></script></body></html>
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#111827"><title>Entrar — {{ title }}</title><link rel="stylesheet" href="/static/style.css"></head>
+<body class="auth-page">
+  <main class="auth-card">
+    <div class="auth-logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6.5h18v11H3zM6 9v6m4-6v6m4-6v6m4-6v6"/></svg></div>
+    <div><span class="dialog-kicker">Acesso restrito</span><h1>{{ title }}</h1><p class="muted">Entre para acessar o monitoramento.</p></div>
+    <form id="login-form"><label>Usuário<input id="login-user" required autocomplete="username" autofocus></label><label>Senha<input id="login-password" type="password" required autocomplete="current-password"></label><button class="primary-button" type="submit">Entrar</button><p id="login-error" class="error-banner" hidden></p></form>
+  </main>
+  <script src="/static/login.js" defer></script>
+</body>
+</html>
