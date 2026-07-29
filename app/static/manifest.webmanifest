@@ -1,0 +1,13 @@
+{
+  "name": "Proxmox PBS Dashboard",
+  "short_name": "Proxmox",
+  "description": "Monitoramento e operação de VMs e CTs Proxmox",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f141b",
+  "theme_color": "#1565c0",
+  "icons": [
+    {"src": "/static/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
+}
