@@ -23,10 +23,7 @@ install -d -o root -g root -m 0755 "$APP_DIR" "$CONFIG_DIR"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$STATE_DIR"
 
 if [[ "$SOURCE_DIR" != "$APP_DIR" ]]; then
-  rsync -a --delete \
-    --exclude '.venv/' \
-    --exclude '.env' \
-    "$SOURCE_DIR/" "$APP_DIR/"
+  rsync -a --delete --exclude '.venv/' --exclude '.env' "$SOURCE_DIR/" "$APP_DIR/"
 fi
 
 python3 -m venv "$APP_DIR/.venv"
@@ -47,23 +44,11 @@ fi
 chown root:"$SERVICE_USER" "$CONFIG_DIR/dashboard.env"
 chmod 0660 "$CONFIG_DIR/dashboard.env"
 
-if [[ ! -f "$CONFIG_DIR/pve-instances.json" && -f "$APP_DIR/config/pve-instances.example.json" ]]; then
-  install -m 0640 "$APP_DIR/config/pve-instances.example.json" "$CONFIG_DIR/pve-instances.json"
-fi
-if [[ -f "$CONFIG_DIR/pve-instances.json" ]]; then
-  chown root:"$SERVICE_USER" "$CONFIG_DIR/pve-instances.json"
-  chmod 0640 "$CONFIG_DIR/pve-instances.json"
-fi
-
-if [[ ! -f "$CONFIG_DIR/ip-overrides.json" ]]; then
-  printf '{}\n' > "$CONFIG_DIR/ip-overrides.json"
-fi
+if [[ ! -f "$CONFIG_DIR/ip-overrides.json" ]]; then printf '{}\n' > "$CONFIG_DIR/ip-overrides.json"; fi
 chown root:"$SERVICE_USER" "$CONFIG_DIR/ip-overrides.json"
 chmod 0640 "$CONFIG_DIR/ip-overrides.json"
 
-if [[ ! -f "$STATE_DIR/notes.json" ]]; then
-  printf '{}\n' > "$STATE_DIR/notes.json"
-fi
+if [[ ! -f "$STATE_DIR/notes.json" ]]; then printf '{}\n' > "$STATE_DIR/notes.json"; fi
 chown "$SERVICE_USER":"$SERVICE_USER" "$STATE_DIR/notes.json"
 chmod 0640 "$STATE_DIR/notes.json"
 
@@ -73,6 +58,6 @@ systemctl enable proxmox-pbs-dashboard.service
 
 printf '\nPróximos passos:\n'
 printf '1. Revise %s/dashboard.env\n' "$CONFIG_DIR"
-printf '2. Edite %s/pve-instances.json\n' "$CONFIG_DIR"
+printf '2. Ajuste PBS e PVEs pela página Configurações\n'
 printf '3. Execute: systemctl restart proxmox-pbs-dashboard\n'
 printf '4. Acesse: http://IP-DO-CONTAINER:8080\n'
