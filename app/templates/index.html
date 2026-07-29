@@ -1,57 +1,49 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-theme="{{ default_theme }}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1565c0">
   <meta name="color-scheme" content="light dark">
   <title>{{ title }}</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body data-refresh-seconds="{{ refresh_seconds }}">
-  <main class="layout">
-    <header class="page-header">
-      <div class="brand-block">
-        <span class="brand-icon" aria-hidden="true">⌕</span>
-        <div>
-          <p class="eyebrow">Monitoramento Proxmox</p>
-          <h1>{{ title }}</h1>
-          <p id="last-update" class="muted">Carregando dados...</p>
-        </div>
-      </div>
-      <button id="refresh" type="button">Atualizar agora</button>
-    </header>
+<body data-refresh-seconds="{{ refresh_seconds }}" data-csrf="{{ csrf }}" data-default-theme="{{ default_theme }}">
+  <header class="app-bar">
+    <div class="app-title"><span class="material-symbol">visibility</span><div><strong>{{ title }}</strong><small id="last-update">Carregando…</small></div></div>
+    <div class="app-actions">
+      <label class="theme-control" title="Tema"><span class="material-symbol">contrast</span><select id="theme-select"><option value="system">Sistema</option><option value="light">Claro</option><option value="dark">Escuro</option></select></label>
+      <button id="refresh" class="icon-button" title="Atualizar" aria-label="Atualizar"><span class="material-symbol">refresh</span></button>
+      <a class="icon-button" href="/settings" title="Configurações" aria-label="Configurações"><span class="material-symbol">settings</span></a>
+      <button id="logout" class="icon-button" title="Sair" aria-label="Sair"><span class="material-symbol">logout</span></button>
+    </div>
+  </header>
 
-    <section id="source-status" class="source-status" aria-live="polite"></section>
+  <main class="shell">
+    <section id="source-status" class="source-status"></section>
 
-    <nav class="tabs" aria-label="Seções do dashboard">
-      <button class="tab active" data-tab="monitoring" type="button">VMs e CTs</button>
-      <button class="tab" data-tab="backups" type="button">Backups</button>
+    <nav class="tabs" aria-label="Seções">
+      <button class="tab active" data-tab="monitoring">Monitoramento</button>
+      <button class="tab" data-tab="backups">Backups</button>
     </nav>
 
-    <section class="filters" aria-label="Filtros de visualização">
-      <label>Pesquisar<input id="search" type="search" placeholder="Nome, ID, IP, PVE, nó ou nota" autocomplete="off"></label>
-      <label>Tipo<select id="filter-kind"><option value="all">Todos</option><option value="qemu">VMs</option><option value="lxc">CTs</option></select></label>
-      <label>Estado<select id="filter-state"><option value="all">Todos</option><option value="running">Ligados</option><option value="stopped">Desligados</option></select></label>
-      <label>Backup<select id="filter-backup"><option value="all">Todos</option><option value="success">Sucesso</option><option value="failed">Erro</option><option value="missing">Sem backup</option><option value="running">Executando</option></select></label>
-      <label>PVE<select id="filter-pve"><option value="all">Todos</option></select></label>
-      <button id="clear-filters" class="secondary" type="button">Limpar</button>
+    <section class="filter-bar">
+      <label class="search-box"><span class="material-symbol">search</span><input id="search" type="search" placeholder="Pesquisar nome, ID, IP, PVE ou nota" autocomplete="off"></label>
+      <select id="filter-state" aria-label="Status"><option value="all">Todos os status</option><option value="running">Ligados</option><option value="stopped">Desligados</option></select>
+      <select id="filter-pve" aria-label="PVE"><option value="all">Todos os PVE</option></select>
+      <button id="clear-filters" class="text-button">Limpar</button>
     </section>
 
     <section id="monitoring-panel" class="tab-panel active">
-      <section class="metrics" aria-label="Resumo de monitoramento">
-        <article class="metric"><span>Total</span><strong id="metric-total">—</strong></article>
-        <article class="metric"><span>VMs</span><strong id="metric-vms">—</strong></article>
-        <article class="metric"><span>CTs</span><strong id="metric-cts">—</strong></article>
-        <article class="metric"><span>Ligados</span><strong id="metric-running">—</strong></article>
-        <article class="metric"><span>Desligados</span><strong id="metric-stopped">—</strong></article>
+      <section class="summary-strip">
+        <span><b id="metric-total">—</b> Total</span><span><b id="metric-running">—</b> Ligados</span><span><b id="metric-stopped">—</b> Desligados</span><span id="vm-count"></span>
       </section>
-
-      <section class="panel">
-        <div class="panel-heading"><h2>Monitoramento de VMs e CTs</h2><span id="vm-count" class="muted"></span></div>
+      <section class="data-card">
         <div class="table-wrap">
-          <table>
-            <thead><tr><th>Estado</th><th>Tipo</th><th>PVE</th><th>Nome</th><th>ID</th><th>IP</th><th>Uso</th><th>Uptime</th><th>Nó</th><th>Notas</th><th>Ações</th></tr></thead>
+          <table class="dense-table">
+            <thead><tr><th>Status</th><th>ID</th><th>Nome</th><th>Ações</th><th>IP</th><th>Uso</th><th>Uptime</th><th>PVE</th><th class="notes-col">Notas</th></tr></thead>
             <tbody id="vm-table"></tbody>
           </table>
         </div>
@@ -59,55 +51,26 @@
     </section>
 
     <section id="backups-panel" class="tab-panel">
-      <section class="backup-overview">
-        <article class="panel chart-panel">
-          <div class="panel-heading"><h2>Distribuição dos backups</h2><span id="backup-chart-total" class="muted"></span></div>
-          <div class="chart-content">
-            <div id="backup-pie" class="pie" role="img" aria-label="Distribuição dos estados de backup"><span id="pie-center">—</span></div>
-            <div id="backup-legend" class="legend"></div>
-          </div>
-        </article>
-        <section class="metrics backup-metrics" aria-label="Resumo de backups">
-          <article class="metric"><span>Sucesso</span><strong id="metric-backup-success">—</strong></article>
-          <article class="metric"><span>Erro</span><strong id="metric-backup-failed">—</strong></article>
-          <article class="metric"><span>Sem backup</span><strong id="metric-backup-missing">—</strong></article>
-          <article class="metric"><span>Executando</span><strong id="metric-backup-running">—</strong></article>
-        </section>
-      </section>
-
-      <section class="panel">
-        <div class="panel-heading"><h2>Backups no PBS</h2><span id="backup-count" class="muted"></span></div>
+      <section class="data-card">
         <div class="table-wrap">
-          <table>
-            <thead><tr><th>Status</th><th>Tipo</th><th>PVE</th><th>Nome</th><th>ID</th><th>Último backup</th><th>Datastore</th></tr></thead>
-            <tbody id="backup-table"></tbody>
-          </table>
+          <table class="dense-table"><thead><tr><th>Status</th><th>ID</th><th>Nome</th><th>Último backup</th><th>Datastore</th><th>PVE</th></tr></thead><tbody id="backup-table"></tbody></table>
         </div>
       </section>
     </section>
-
-    <p id="error" class="error" role="alert" hidden></p>
+    <p id="error" class="error" hidden></p>
   </main>
 
-  <dialog id="note-dialog">
-    <form id="note-form" method="dialog">
-      <div class="dialog-heading"><div><p class="eyebrow">Nota persistente</p><h2 id="note-title">Adicionar nota</h2></div><button id="note-close" class="icon-button" type="button" aria-label="Fechar">×</button></div>
-      <textarea id="note-text" maxlength="4000" rows="8" placeholder="Registre observações operacionais, responsáveis, pendências ou contexto..."></textarea>
-      <div class="dialog-actions"><button id="note-delete" class="danger-button" type="button">Excluir nota</button><button id="note-cancel" class="secondary" type="button">Cancelar</button><button type="submit">Salvar</button></div>
+  <dialog id="power-dialog" class="md-dialog">
+    <form id="power-form">
+      <header><h2 id="power-title">Operação</h2><button type="button" class="icon-button" data-close-dialog="power-dialog"><span class="material-symbol">close</span></button></header>
+      <p id="power-description" class="muted"></p>
+      <div class="form-grid"><label>Usuário<input id="power-user" required autocomplete="username"></label><label>Realm<select id="power-realm"><option value="pam">pam</option><option value="pve">pve</option></select></label><label>Senha<input id="power-password" type="password" required autocomplete="current-password"></label><label>2FA opcional<input id="power-otp" autocomplete="one-time-code"></label></div>
+      <footer><button type="button" class="text-button" data-close-dialog="power-dialog">Cancelar</button><button type="submit" class="primary-button">Confirmar</button></footer>
     </form>
   </dialog>
 
-  <dialog id="action-dialog">
-    <form id="action-form">
-      <div class="dialog-heading"><div><p class="eyebrow">Operação Proxmox</p><h2 id="action-title">Confirmar operação</h2></div><button id="action-close" class="icon-button" type="button" aria-label="Fechar">×</button></div>
-      <p id="action-description" class="muted"></p>
-      <label>Usuário<input id="action-username" required autocomplete="username" placeholder="usuario ou usuario@realm"></label>
-      <label>Realm<select id="action-realm"><option value="pam">pam</option><option value="pve">pve</option></select></label>
-      <label>Senha<input id="action-password" type="password" required autocomplete="current-password"></label>
-      <label>Código 2FA (opcional)<input id="action-otp" autocomplete="one-time-code"></label>
-      <div class="dialog-actions"><button id="action-cancel" class="secondary" type="button">Cancelar</button><button id="action-submit" type="submit">Executar</button></div>
-    </form>
-  </dialog>
+  <dialog id="note-dialog" class="md-dialog"><form id="note-form"><header><h2 id="note-title">Nota</h2><button type="button" class="icon-button" data-close-dialog="note-dialog"><span class="material-symbol">close</span></button></header><textarea id="note-text" maxlength="4000" rows="7"></textarea><footer><button id="note-delete" type="button" class="danger-text">Excluir</button><span></span><button type="button" class="text-button" data-close-dialog="note-dialog">Cancelar</button><button type="submit" class="primary-button">Salvar</button></footer></form></dialog>
+
   <div id="toast" class="toast" hidden></div>
   <script src="/static/app.js" defer></script>
 </body>
