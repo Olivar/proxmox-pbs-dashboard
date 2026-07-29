@@ -13,7 +13,7 @@ STATE_DIR=/var/lib/proxmox-pbs-dashboard
 SERVICE_USER=proxmox-dashboard
 
 apt-get update
-apt-get install -y python3 python3-venv python3-pip ca-certificates git rsync
+apt-get install -y python3 python3-venv python3-pip ca-certificates git rsync openssl
 
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   useradd --system --home-dir "$STATE_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
@@ -34,11 +34,18 @@ python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 
 if [[ ! -f "$CONFIG_DIR/dashboard.env" ]]; then
-  install -m 0640 "$APP_DIR/.env.example" "$CONFIG_DIR/dashboard.env"
-  echo "Criado $CONFIG_DIR/dashboard.env. Configure os tokens antes de iniciar o serviço."
+  install -m 0660 "$APP_DIR/.env.example" "$CONFIG_DIR/dashboard.env"
+  DASH_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)
+  SESSION_SECRET=$(openssl rand -hex 32)
+  sed -i "0,/^DASHBOARD_PASSWORD=SUBSTITUA$/s//DASHBOARD_PASSWORD=${DASH_PASSWORD}/" "$CONFIG_DIR/dashboard.env"
+  sed -i "0,/^DASHBOARD_SESSION_SECRET=SUBSTITUA$/s//DASHBOARD_SESSION_SECRET=${SESSION_SECRET}/" "$CONFIG_DIR/dashboard.env"
+  echo "Criado $CONFIG_DIR/dashboard.env"
+  echo "Usuário inicial: admin"
+  echo "Senha inicial: $DASH_PASSWORD"
+  echo "Guarde esta senha. Ela não será exibida novamente."
 fi
 chown root:"$SERVICE_USER" "$CONFIG_DIR/dashboard.env"
-chmod 0640 "$CONFIG_DIR/dashboard.env"
+chmod 0660 "$CONFIG_DIR/dashboard.env"
 
 if [[ ! -f "$CONFIG_DIR/pve-instances.json" && -f "$APP_DIR/config/pve-instances.example.json" ]]; then
   install -m 0640 "$APP_DIR/config/pve-instances.example.json" "$CONFIG_DIR/pve-instances.json"
@@ -64,10 +71,8 @@ install -m 0644 "$APP_DIR/deploy/proxmox-pbs-dashboard.service" /etc/systemd/sys
 systemctl daemon-reload
 systemctl enable proxmox-pbs-dashboard.service
 
-echo
-printf 'Próximos passos:\n'
-printf '1. Edite %s/dashboard.env\n' "$CONFIG_DIR"
+printf '\nPróximos passos:\n'
+printf '1. Revise %s/dashboard.env\n' "$CONFIG_DIR"
 printf '2. Edite %s/pve-instances.json\n' "$CONFIG_DIR"
 printf '3. Execute: systemctl restart proxmox-pbs-dashboard\n'
-printf '4. Consulte: systemctl status proxmox-pbs-dashboard\n'
-printf '5. Acesse: http://IP-DO-CONTAINER:8080\n'
+printf '4. Acesse: http://IP-DO-CONTAINER:8080\n'
