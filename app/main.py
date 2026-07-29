@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 
+from app.auth import COOKIE_NAME, create_session, read_session, require_csrf, verify_password
 from app.config import get_settings
 from app.ip_cache import IpCache
 from app.models import DashboardPayload, NoteUpdate
@@ -19,9 +21,20 @@ from app.operations import router as operations_router
 from app.pbs import PbsClient
 from app.proxmox import ProxmoxClient
 from app.service import DashboardService
+from app.settings_store import masked_settings, write_env
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+PUBLIC_PATHS = {"/login", "/health", "/manifest.webmanifest", "/sw.js"}
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class SettingsUpdate(BaseModel):
+    values: dict[str, str]
 
 
 async def refresh_loop(service: DashboardService, interval: int) -> None:
@@ -62,21 +75,83 @@ app.include_router(operations_router)
 
 
 @app.middleware("http")
-async def security_headers(request: Request, call_next) -> Response:
+async def authentication_and_headers(request: Request, call_next) -> Response:
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    path = request.url.path
+    public = path in PUBLIC_PATHS or path.startswith("/static/")
+    session = read_session(request, settings.dashboard_session_secret)
+    request.state.session = session
+
+    if not public and session is None:
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "Autenticação necessária"}, status_code=401)
+        return RedirectResponse("/login", status_code=303)
+
+    if request.method not in {"GET", "HEAD", "OPTIONS"} and path not in {"/api/login"}:
+        if session is None or not require_csrf(request, session):
+            return JSONResponse({"detail": "Token CSRF inválido"}, status_code=403)
+
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
-    if request.url.path.startswith("/api/") or request.url.path == "/health":
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'"
+    if path.startswith("/api/") or path == "/health":
         response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request) -> HTMLResponse | RedirectResponse:
+    settings = request.app.state.settings
+    if read_session(request, settings.dashboard_session_secret):
+        return RedirectResponse("/", status_code=303)
+    return TEMPLATES.TemplateResponse(request=request, name="login.html", context={"title": settings.dashboard_title})
+
+
+@app.post("/api/login")
+async def login(body: LoginRequest, request: Request) -> Response:
+    settings = request.app.state.settings
+    if body.username != settings.dashboard_username or not verify_password(body.password, settings.dashboard_password):
+        raise HTTPException(status_code=401, detail="Usuário ou senha inválidos")
+    token = create_session(body.username, settings.dashboard_session_secret)
+    response = JSONResponse({"ok": True})
+    response.set_cookie(COOKIE_NAME, token, httponly=True, secure=request.url.scheme == "https", samesite="strict", max_age=8 * 60 * 60, path="/")
+    return response
+
+
+@app.post("/api/logout")
+async def logout() -> Response:
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(COOKIE_NAME, path="/")
     return response
 
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     settings = request.app.state.settings
-    return TEMPLATES.TemplateResponse(request=request, name="index.html", context={"title": settings.dashboard_title, "refresh_seconds": settings.refresh_seconds})
+    return TEMPLATES.TemplateResponse(request=request, name="index.html", context={"title": settings.dashboard_title, "refresh_seconds": settings.refresh_seconds, "default_theme": settings.dashboard_default_theme, "csrf": request.state.session.csrf})
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request) -> HTMLResponse:
+    settings = request.app.state.settings
+    return TEMPLATES.TemplateResponse(request=request, name="settings.html", context={"title": settings.dashboard_title, "values": masked_settings(settings.dashboard_env_file), "csrf": request.state.session.csrf, "default_theme": settings.dashboard_default_theme})
+
+
+@app.put("/api/settings")
+async def save_settings(body: SettingsUpdate, request: Request) -> dict[str, object]:
+    try:
+        write_env(request.app.state.settings.dashboard_env_file, body.values)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Falha ao gravar ENV: {exc}") from exc
+    return {"ok": True, "restart_required": True}
+
+
+@app.get("/api/session")
+async def session_info(request: Request) -> dict[str, str]:
+    return {"username": request.state.session.username, "csrf": request.state.session.csrf}
 
 
 @app.get("/api/dashboard", response_model=DashboardPayload)
@@ -104,6 +179,16 @@ async def save_note(pve_id: str, vmid: int, body: NoteUpdate, request: Request) 
             if guest.pve_id == pve_id and guest.vmid == vmid:
                 guest.note = note
     return {"ok": True, "pve_id": pve_id, "vmid": vmid, "note": note}
+
+
+@app.get("/manifest.webmanifest")
+async def manifest() -> FileResponse:
+    return FileResponse(BASE_DIR / "static" / "manifest.webmanifest", media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+async def service_worker() -> FileResponse:
+    return FileResponse(BASE_DIR / "static" / "sw.js", media_type="application/javascript", headers={"Service-Worker-Allowed": "/"})
 
 
 @app.get("/health")
