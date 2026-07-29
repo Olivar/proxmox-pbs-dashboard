@@ -1,159 +1,64 @@
 "use strict";
 
-const state = { payload: null, query: "", kind: "all", guestState: "all", backup: "all", pve: "all", tab: "monitoring", noteGuest: null, actionGuest: null, action: null };
-const refreshSeconds = Number(document.body.dataset.refreshSeconds || 60);
 const $ = (id) => document.getElementById(id);
-const elements = {
-  search: $("search"), kind: $("filter-kind"), guestState: $("filter-state"), backup: $("filter-backup"), pve: $("filter-pve"), clear: $("clear-filters"), refresh: $("refresh"),
-  lastUpdate: $("last-update"), sourceStatus: $("source-status"), vmTable: $("vm-table"), backupTable: $("backup-table"), vmCount: $("vm-count"), backupCount: $("backup-count"), error: $("error"),
-  metricTotal: $("metric-total"), metricVms: $("metric-vms"), metricCts: $("metric-cts"), metricRunning: $("metric-running"), metricStopped: $("metric-stopped"),
-  metricBackupSuccess: $("metric-backup-success"), metricBackupFailed: $("metric-backup-failed"), metricBackupMissing: $("metric-backup-missing"), metricBackupRunning: $("metric-backup-running"),
-  pie: $("backup-pie"), pieCenter: $("pie-center"), legend: $("backup-legend"), chartTotal: $("backup-chart-total"), noteDialog: $("note-dialog"), noteForm: $("note-form"), noteTitle: $("note-title"), noteText: $("note-text"), noteDelete: $("note-delete"), actionDialog: $("action-dialog"), actionForm: $("action-form"), actionTitle: $("action-title"), actionDescription: $("action-description"), actionUsername: $("action-username"), actionRealm: $("action-realm"), actionPassword: $("action-password"), actionOtp: $("action-otp"), actionSubmit: $("action-submit"), toast: $("toast")
-};
+const csrf = document.body.dataset.csrf;
+const refreshSeconds = Number(document.body.dataset.refreshSeconds || 60);
+const state = {payload: null, query: "", status: "all", pve: "all", tab: "monitoring", noteGuest: null, powerGuest: null, powerAction: null};
+const elements = {search: $("search"), status: $("filter-state"), pve: $("filter-pve"), clear: $("clear-filters"), refresh: $("refresh"), logout: $("logout"), theme: $("theme-select"), lastUpdate: $("last-update"), sourceStatus: $("source-status"), vmTable: $("vm-table"), backupTable: $("backup-table"), vmCount: $("vm-count"), error: $("error"), metricTotal: $("metric-total"), metricRunning: $("metric-running"), metricStopped: $("metric-stopped"), toast: $("toast"), noteDialog: $("note-dialog"), noteForm: $("note-form"), noteTitle: $("note-title"), noteText: $("note-text"), noteDelete: $("note-delete"), powerDialog: $("power-dialog"), powerForm: $("power-form"), powerTitle: $("power-title"), powerDescription: $("power-description")};
+const escapeHtml = (v) => String(v ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+const formatDate = (v) => { if (!v) return "—"; const d = new Date(v); return Number.isNaN(d.getTime()) ? "—" : new Intl.DateTimeFormat("pt-BR", {dateStyle: "short", timeStyle: "short"}).format(d); };
+const showToast = (text) => { elements.toast.textContent = text; elements.toast.hidden = false; clearTimeout(showToast.timer); showToast.timer = setTimeout(() => elements.toast.hidden = true, 2600); };
+const api = async (url, options = {}) => { const headers = {...(options.headers || {}), Accept: "application/json"}; if (options.method && options.method !== "GET") headers["X-CSRF-Token"] = csrf; const response = await fetch(url, {...options, headers, cache: "no-store"}); if (response.status === 401) { location.replace("/login"); throw new Error("Sessão expirada"); } const payload = await response.json(); if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`); return payload; };
 
-const htmlEscape = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
-const attrEscape = (value) => htmlEscape(value);
-const backupLabels = { success: "Sucesso", failed: "Erro", running: "Executando", missing: "Sem backup", unknown: "Desconhecido" };
-const chartColors = { success: "#45d493", failed: "#ff746c", missing: "#c5cedb", running: "#ffd166", unknown: "#748198" };
-const stateBadge = (guest) => `<span class="badge badge-${attrEscape(guest.state)}">${htmlEscape(guest.state_display)}</span>`;
-const backupBadge = (backup) => `<span class="badge badge-${backup.status === "running" ? "backup-running" : attrEscape(backup.status)}"${backup.detail ? ` title="${attrEscape(backup.detail)}"` : ""}>${htmlEscape(backupLabels[backup.status] || "Desconhecido")}</span>`;
-const formatDate = (value) => { if (!value) return "—"; const d = new Date(value); return Number.isNaN(d.getTime()) ? "—" : new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "medium" }).format(d); };
-const pveLink = (guest) => `<a class="table-link" href="${attrEscape(guest.pve_url)}" target="_blank" rel="noopener noreferrer">${htmlEscape(guest.pve_name)}</a>`;
-const nodeLink = (guest) => `<a class="table-link" href="${attrEscape(guest.pve_url)}/#v1:0:=node/${encodeURIComponent(guest.node)}" target="_blank" rel="noopener noreferrer">${htmlEscape(guest.node)}</a>`;
-const ipButton = (guest) => guest.ip ? `<button class="copy-ip" type="button" data-copy-ip="${attrEscape(guest.ip)}" title="Copiar IP">${htmlEscape(guest.ip)}</button>` : `<button class="copy-ip unavailable" type="button" disabled>Indisponível</button>`;
-const noteButton = (guest) => `<button class="note-button ${guest.note ? "has-note" : ""}" type="button" data-note-pve="${attrEscape(guest.pve_id)}" data-note-vmid="${guest.vmid}" title="${attrEscape(guest.note || "Adicionar nota")}">${guest.note ? "Ver nota" : "Adicionar"}</button>`;
-const usageText = (guest) => `CPU: ${Number(guest.cpu_percent || 0)}% / RAM: ${Number(guest.ram_percent || 0)}%`;
-const actionButtons = (guest) => guest.state === "running" ? `<div class="action-buttons"><button class="secondary compact" type="button" data-guest-action="shutdown" data-pve="${attrEscape(guest.pve_id)}" data-vmid="${guest.vmid}">Desligar</button><button class="secondary compact" type="button" data-guest-action="reboot" data-pve="${attrEscape(guest.pve_id)}" data-vmid="${guest.vmid}">Reiniciar</button></div>` : guest.state === "stopped" ? `<button class="secondary compact" type="button" data-guest-action="start" data-pve="${attrEscape(guest.pve_id)}" data-vmid="${guest.vmid}">Iniciar</button>` : "—";
+const applyTheme = (theme) => { document.documentElement.dataset.theme = theme; elements.theme.value = theme; localStorage.setItem("ppd-theme", theme); };
+applyTheme(localStorage.getItem("ppd-theme") || document.body.dataset.defaultTheme || "system");
+elements.theme.addEventListener("change", (e) => applyTheme(e.target.value));
 
-const filteredGuests = () => {
+const filtered = () => {
   if (!state.payload) return [];
-  const query = state.query.trim().toLocaleLowerCase("pt-BR");
-  return state.payload.vms.filter((guest) => {
-    const matchesText = !query || [guest.name, guest.vmid, guest.ip, guest.node, guest.pve_name, guest.note, guest.kind_display].some((v) => String(v ?? "").toLocaleLowerCase("pt-BR").includes(query));
-    return matchesText && (state.kind === "all" || guest.kind === state.kind) && (state.guestState === "all" || guest.state === state.guestState) && (state.backup === "all" || guest.backup.status === state.backup) && (state.pve === "all" || guest.pve_id === state.pve);
-  });
+  const q = state.query.trim().toLocaleLowerCase("pt-BR");
+  return state.payload.vms.filter((g) => (!q || [g.vmid, g.name, g.ip, g.pve_name, g.note].some((x) => String(x ?? "").toLocaleLowerCase("pt-BR").includes(q))) && (state.status === "all" || g.state === state.status) && (state.pve === "all" || g.pve_id === state.pve));
 };
+const statusBadge = (g) => `<span class="status status-${escapeHtml(g.state)}"><i></i>${escapeHtml(g.state_display)}</span>`;
+const pveLink = (g) => `<a href="${escapeHtml(g.pve_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(g.pve_name)}</a>`;
+const usage = (g) => `CPU: ${g.cpu_percent}% / RAM: ${g.ram_percent}%`;
+const actionButtons = (g) => g.state === "stopped"
+  ? `<button class="row-icon play" data-power="start" data-pve="${escapeHtml(g.pve_id)}" data-vmid="${g.vmid}" title="Iniciar" aria-label="Iniciar">▶</button>`
+  : `<button class="row-icon stop" data-power="shutdown" data-pve="${escapeHtml(g.pve_id)}" data-vmid="${g.vmid}" title="Desligar" aria-label="Desligar">■</button><button class="row-icon restart" data-power="reboot" data-pve="${escapeHtml(g.pve_id)}" data-vmid="${g.vmid}" title="Reiniciar" aria-label="Reiniciar">↻</button>`;
+const noteButton = (g) => `<button class="row-icon note ${g.note ? "has-note" : ""}" data-note="1" data-pve="${escapeHtml(g.pve_id)}" data-vmid="${g.vmid}" title="${escapeHtml(g.note || "Adicionar nota")}" aria-label="Nota">✎</button>`;
 
-const sourceChip = (label, source) => `<span class="status-chip ${source.ok ? "ok" : "error"}"${source.error ? ` title="${attrEscape(source.error)}"` : ""}>${htmlEscape(label)}: ${source.ok ? "online" : "erro"}</span>`;
-
-const renderPveOptions = () => {
-  const current = state.pve;
-  const entries = [...new Map((state.payload?.vms || []).map((g) => [g.pve_id, g.pve_name])).entries()].sort((a, b) => a[1].localeCompare(b[1], "pt-BR"));
-  elements.pve.innerHTML = `<option value="all">Todos</option>${entries.map(([id, name]) => `<option value="${attrEscape(id)}">${htmlEscape(name)}</option>`).join("")}`;
-  elements.pve.value = entries.some(([id]) => id === current) ? current : "all";
-};
-
-const renderChart = (guests) => {
-  const counts = { success: 0, failed: 0, missing: 0, running: 0, unknown: 0 };
-  guests.forEach((g) => { counts[g.backup.status] = (counts[g.backup.status] || 0) + 1; });
-  const total = guests.length;
-  let cursor = 0;
-  const slices = Object.entries(counts).filter(([, count]) => count > 0).map(([status, count]) => { const start = cursor; cursor += total ? (count / total) * 100 : 0; return `${chartColors[status]} ${start}% ${cursor}%`; });
-  elements.pie.style.background = slices.length ? `conic-gradient(${slices.join(",")})` : "var(--neutral-bg)";
-  elements.pieCenter.textContent = total;
-  elements.chartTotal.textContent = `${total} guests`;
-  elements.legend.innerHTML = Object.entries(counts).filter(([status]) => status !== "unknown" || counts.unknown).map(([status, count]) => `<div class="legend-item"><span class="legend-dot" style="background:${chartColors[status]}"></span><span>${htmlEscape(backupLabels[status])}</span><strong>${count}</strong></div>`).join("");
-  elements.metricBackupSuccess.textContent = counts.success;
-  elements.metricBackupFailed.textContent = counts.failed;
-  elements.metricBackupMissing.textContent = counts.missing + counts.unknown;
-  elements.metricBackupRunning.textContent = counts.running;
-};
-
-const render = () => {
+function renderPveOptions() {
+  const entries = [...new Map((state.payload?.vms || []).map((g) => [g.pve_id, g.pve_name])).entries()].sort((a,b) => a[1].localeCompare(b[1], "pt-BR"));
+  elements.pve.innerHTML = `<option value="all">Todos os PVE</option>${entries.map(([id,name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`).join("")}`;
+  elements.pve.value = entries.some(([id]) => id === state.pve) ? state.pve : "all";
+}
+function render() {
   if (!state.payload) return;
-  const guests = filteredGuests();
-  const all = state.payload.vms;
-  elements.metricTotal.textContent = all.length;
-  elements.metricVms.textContent = all.filter((g) => g.kind === "qemu").length;
-  elements.metricCts.textContent = all.filter((g) => g.kind === "lxc").length;
-  elements.metricRunning.textContent = all.filter((g) => g.state === "running").length;
-  elements.metricStopped.textContent = all.filter((g) => g.state === "stopped").length;
-  elements.vmCount.textContent = `${guests.length} de ${all.length}`;
-  elements.backupCount.textContent = `${guests.length} itens`;
+  const guests = filtered(); const all = state.payload.vms;
+  elements.metricTotal.textContent = all.length; elements.metricRunning.textContent = all.filter((g) => g.state === "running").length; elements.metricStopped.textContent = all.filter((g) => g.state === "stopped").length; elements.vmCount.textContent = `${guests.length} exibidos`;
+  elements.vmTable.innerHTML = guests.length ? guests.map((g) => `<tr><td data-label="Status">${statusBadge(g)}</td><td data-label="ID" class="mono">${g.vmid}</td><td data-label="Nome"><strong>${escapeHtml(g.name)}</strong></td><td data-label="Ações"><div class="row-actions">${actionButtons(g)}</div></td><td data-label="IP">${g.ip ? `<button class="ip-link" data-ip="${escapeHtml(g.ip)}">${escapeHtml(g.ip)}</button>` : "—"}</td><td data-label="Uso" class="usage">${usage(g)}</td><td data-label="Uptime">${escapeHtml(g.uptime_display)}</td><td data-label="PVE">${pveLink(g)}</td><td data-label="Notas">${noteButton(g)}</td></tr>`).join("") : `<tr><td colspan="9" class="empty">Nenhum item encontrado.</td></tr>`;
+  elements.backupTable.innerHTML = guests.length ? guests.map((g) => `<tr><td>${escapeHtml(g.backup.status)}</td><td class="mono">${g.vmid}</td><td><strong>${escapeHtml(g.name)}</strong></td><td>${formatDate(g.backup.last_backup)}</td><td>${escapeHtml(g.backup.datastore || "—")}</td><td>${pveLink(g)}</td></tr>`).join("") : `<tr><td colspan="6" class="empty">Nenhum item encontrado.</td></tr>`;
+  elements.lastUpdate.textContent = `${state.payload.stale ? "Dados em cache" : "Atualizado"}: ${formatDate(state.payload.updated_at)}`;
+  elements.sourceStatus.innerHTML = [...state.payload.pve.map((s) => `<span class="source ${s.ok ? "ok" : "error"}">${escapeHtml(s.source_name || "PVE")}</span>`), `<span class="source ${state.payload.pbs.ok ? "ok" : "error"}">PBS</span>`].join("");
+}
+async function load(force = false) { elements.refresh.disabled = true; elements.error.hidden = true; try { state.payload = await api(force ? "/api/refresh" : "/api/dashboard", {method: force ? "POST" : "GET"}); renderPveOptions(); render(); } catch (error) { elements.error.textContent = error.message; elements.error.hidden = false; } finally { elements.refresh.disabled = false; } }
 
-  elements.vmTable.innerHTML = guests.length ? guests.map((g) => `<tr><td>${stateBadge(g)}</td><td><span class="type-badge">${htmlEscape(g.kind_display)}</span></td><td>${pveLink(g)}</td><td><strong>${htmlEscape(g.name)}</strong></td><td>${g.vmid}</td><td>${ipButton(g)}</td><td>${htmlEscape(usageText(g))}</td><td>${htmlEscape(g.uptime_display)}</td><td>${nodeLink(g)}</td><td>${noteButton(g)}</td><td>${actionButtons(g)}</td></tr>`).join("") : `<tr><td class="empty" colspan="11">Nenhum item encontrado.</td></tr>`;
-  elements.backupTable.innerHTML = guests.length ? guests.map((g) => `<tr><td>${backupBadge(g.backup)}</td><td><span class="type-badge">${htmlEscape(g.kind_display)}</span></td><td>${pveLink(g)}</td><td><strong>${htmlEscape(g.name)}</strong></td><td>${g.vmid}</td><td>${formatDate(g.backup.last_backup)}</td><td>${htmlEscape(g.backup.datastore || "—")}</td></tr>`).join("") : `<tr><td class="empty" colspan="7">Nenhum item encontrado.</td></tr>`;
-  renderChart(guests);
-  elements.lastUpdate.textContent = `${state.payload.stale ? "Dados parciais/em cache" : "Atualizado"}: ${formatDate(state.payload.updated_at)}`;
-  elements.sourceStatus.innerHTML = [...state.payload.pve.map((source) => sourceChip(source.source_name || "PVE", source)), sourceChip("PBS", state.payload.pbs)].join("");
-};
+function findGuest(pve, vmid) { return state.payload?.vms.find((g) => g.pve_id === pve && g.vmid === Number(vmid)); }
+function openPower(g, action) { state.powerGuest = g; state.powerAction = action; const labels = {start: "Iniciar", shutdown: "Desligar", reboot: "Reiniciar"}; elements.powerTitle.textContent = labels[action]; elements.powerDescription.textContent = `${labels[action]} ${g.kind_display} ${g.vmid} — ${g.name}?`; elements.powerForm.reset(); elements.powerDialog.showModal(); }
+function openNote(g) { state.noteGuest = g; elements.noteTitle.textContent = `${g.vmid} — ${g.name}`; elements.noteText.value = g.note || ""; elements.noteDelete.hidden = !g.note; elements.noteDialog.showModal(); }
 
-const showToast = (message) => { elements.toast.textContent = message; elements.toast.hidden = false; window.clearTimeout(showToast.timer); showToast.timer = window.setTimeout(() => { elements.toast.hidden = true; }, 2200); };
-const copyIp = async (ip) => { try { await navigator.clipboard.writeText(ip); showToast(`IP ${ip} copiado`); } catch { const input = document.createElement("textarea"); input.value = ip; document.body.append(input); input.select(); document.execCommand("copy"); input.remove(); showToast(`IP ${ip} copiado`); } };
+document.addEventListener("click", async (event) => {
+  const power = event.target.closest("[data-power]"); if (power) openPower(findGuest(power.dataset.pve, power.dataset.vmid), power.dataset.power);
+  const note = event.target.closest("[data-note]"); if (note) openNote(findGuest(note.dataset.pve, note.dataset.vmid));
+  const ip = event.target.closest("[data-ip]"); if (ip) { await navigator.clipboard.writeText(ip.dataset.ip); showToast("IP copiado"); }
+  const closer = event.target.closest("[data-close-dialog]"); if (closer) $(closer.dataset.closeDialog).close();
+});
 
-const openNote = (pveId, vmid) => {
-  const guest = state.payload?.vms.find((g) => g.pve_id === pveId && g.vmid === Number(vmid));
-  if (!guest) return;
-  state.noteGuest = guest;
-  elements.noteTitle.textContent = `${guest.kind_display} ${guest.vmid} — ${guest.name}`;
-  elements.noteText.value = guest.note || "";
-  elements.noteDelete.hidden = !guest.note;
-  elements.noteDialog.showModal();
-  elements.noteText.focus();
-};
+elements.powerForm.addEventListener("submit", async (event) => { event.preventDefault(); const g = state.powerGuest; const body = {username: $("power-user").value, realm: $("power-realm").value, password: $("power-password").value, otp: $("power-otp").value || null}; try { await api(`/api/guests/${encodeURIComponent(g.pve_id)}/${encodeURIComponent(g.node)}/${g.kind}/${g.vmid}/${state.powerAction}`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}); elements.powerDialog.close(); showToast("Operação enviada"); await load(true); } catch (error) { showToast(error.message); } finally { $("power-password").value = ""; $("power-otp").value = ""; } });
+elements.noteForm.addEventListener("submit", async (event) => { event.preventDefault(); const g = state.noteGuest; try { const result = await api(`/api/notes/${encodeURIComponent(g.pve_id)}/${g.vmid}`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({note: elements.noteText.value})}); g.note = result.note; elements.noteDialog.close(); render(); showToast("Nota salva"); } catch (error) { showToast(error.message); } });
+elements.noteDelete.addEventListener("click", async () => { elements.noteText.value = ""; elements.noteForm.requestSubmit(); });
 
-const saveNote = async (note) => {
-  const guest = state.noteGuest;
-  if (!guest) return;
-  const response = await fetch(`/api/notes/${encodeURIComponent(guest.pve_id)}/${guest.vmid}`, { method: "PUT", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ note }) });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
-  guest.note = payload.note;
-  elements.noteDialog.close();
-  render();
-  showToast(payload.note ? "Nota salva" : "Nota excluída");
-};
-
-const actionLabels = { start: "Iniciar", shutdown: "Desligar", reboot: "Reiniciar" };
-const openAction = (pveId, vmid, action) => {
-  const guest = state.payload?.vms.find((g) => g.pve_id === pveId && g.vmid === Number(vmid));
-  if (!guest || !actionLabels[action]) return;
-  state.actionGuest = guest; state.action = action;
-  elements.actionTitle.textContent = `${actionLabels[action]} ${guest.kind_display} ${guest.vmid}`;
-  elements.actionDescription.textContent = `${actionLabels[action]} ${guest.kind_display} ${guest.vmid} — ${guest.name} em ${guest.pve_name}?`;
-  elements.actionPassword.value = ""; elements.actionOtp.value = "";
-  elements.actionDialog.showModal(); elements.actionUsername.focus();
-};
-
-const runAction = async () => {
-  const guest = state.actionGuest; const action = state.action;
-  if (!guest || !action) return;
-  elements.actionSubmit.disabled = true;
-  try {
-    const response = await fetch(`/api/guests/${encodeURIComponent(guest.pve_id)}/${encodeURIComponent(guest.node)}/${encodeURIComponent(guest.kind)}/${guest.vmid}/${action}`, {
-      method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ username: elements.actionUsername.value, realm: elements.actionRealm.value, password: elements.actionPassword.value, otp: elements.actionOtp.value || null }),
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
-    elements.actionDialog.close(); elements.actionPassword.value = ""; elements.actionOtp.value = "";
-    showToast(`${actionLabels[action]} solicitado com sucesso`); await loadDashboard(true);
-  } finally { elements.actionSubmit.disabled = false; }
-};
-
-const loadDashboard = async (force = false) => {
-  elements.refresh.disabled = true; elements.error.hidden = true;
-  try {
-    const response = await fetch(force ? "/api/refresh" : "/api/dashboard", { method: force ? "POST" : "GET", headers: { Accept: "application/json" }, cache: "no-store" });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
-    state.payload = payload; renderPveOptions(); render();
-  } catch (error) { elements.error.textContent = `Falha ao carregar dashboard: ${error.message}`; elements.error.hidden = false; }
-  finally { elements.refresh.disabled = false; }
-};
-
-document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => { state.tab = button.dataset.tab; document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("active", item === button)); $("monitoring-panel").classList.toggle("active", state.tab === "monitoring"); $("backups-panel").classList.toggle("active", state.tab === "backups"); }));
-[[elements.search, "query", "input"], [elements.kind, "kind", "change"], [elements.guestState, "guestState", "change"], [elements.backup, "backup", "change"], [elements.pve, "pve", "change"]].forEach(([element, key, eventName]) => element.addEventListener(eventName, (event) => { state[key] = event.target.value; render(); }));
-elements.clear.addEventListener("click", () => { state.query = ""; state.kind = state.guestState = state.backup = state.pve = "all"; elements.search.value = ""; elements.kind.value = elements.guestState.value = elements.backup.value = elements.pve.value = "all"; render(); });
-elements.refresh.addEventListener("click", () => loadDashboard(true));
-document.addEventListener("click", (event) => { const copy = event.target.closest("[data-copy-ip]"); if (copy) copyIp(copy.dataset.copyIp); const note = event.target.closest("[data-note-pve]"); if (note) openNote(note.dataset.notePve, note.dataset.noteVmid); const action = event.target.closest("[data-guest-action]"); if (action) openAction(action.dataset.pve, action.dataset.vmid, action.dataset.guestAction); });
-elements.noteForm.addEventListener("submit", async (event) => { event.preventDefault(); try { await saveNote(elements.noteText.value); } catch (error) { showToast(`Erro: ${error.message}`); } });
-elements.noteDelete.addEventListener("click", async () => { try { await saveNote(""); } catch (error) { showToast(`Erro: ${error.message}`); } });
-$("note-close").addEventListener("click", () => elements.noteDialog.close());
-$("note-cancel").addEventListener("click", () => elements.noteDialog.close());
-elements.actionForm.addEventListener("submit", async (event) => { event.preventDefault(); try { await runAction(); } catch (error) { showToast(`Erro: ${error.message}`); } });
-$("action-close").addEventListener("click", () => elements.actionDialog.close());
-$("action-cancel").addEventListener("click", () => elements.actionDialog.close());
-
-loadDashboard(false);
-window.setInterval(() => loadDashboard(false), Math.max(15, refreshSeconds) * 1000);
+document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => { document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b === button)); state.tab = button.dataset.tab; $("monitoring-panel").classList.toggle("active", state.tab === "monitoring"); $("backups-panel").classList.toggle("active", state.tab === "backups"); }));
+elements.search.addEventListener("input", (e) => { state.query = e.target.value; render(); }); elements.status.addEventListener("change", (e) => { state.status = e.target.value; render(); }); elements.pve.addEventListener("change", (e) => { state.pve = e.target.value; render(); }); elements.clear.addEventListener("click", () => { state.query = ""; state.status = state.pve = "all"; elements.search.value = ""; elements.status.value = elements.pve.value = "all"; render(); }); elements.refresh.addEventListener("click", () => load(true)); elements.logout.addEventListener("click", async () => { await api("/api/logout", {method: "POST"}); location.replace("/login"); });
+if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js"));
+load(); setInterval(() => load(), Math.max(15, refreshSeconds) * 1000);
