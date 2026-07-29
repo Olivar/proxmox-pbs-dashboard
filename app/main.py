@@ -25,7 +25,7 @@ from app.settings_store import masked_settings, write_env
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-PUBLIC_PATHS = {"/login", "/health", "/manifest.webmanifest", "/sw.js"}
+PUBLIC_PATHS = {"/login", "/api/login", "/health", "/manifest.webmanifest", "/sw.js"}
 
 
 class LoginRequest(BaseModel):
@@ -87,7 +87,7 @@ async def authentication_and_headers(request: Request, call_next) -> Response:
             return JSONResponse({"detail": "Autenticação necessária"}, status_code=401)
         return RedirectResponse("/login", status_code=303)
 
-    if request.method not in {"GET", "HEAD", "OPTIONS"} and path not in {"/api/login"}:
+    if request.method not in {"GET", "HEAD", "OPTIONS"} and path != "/api/login":
         if session is None or not require_csrf(request, session):
             return JSONResponse({"detail": "Token CSRF inválido"}, status_code=403)
 
