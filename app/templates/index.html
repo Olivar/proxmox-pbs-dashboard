@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1565c0">
+  <meta name="theme-color" content="#111827">
   <meta name="color-scheme" content="light dark">
   <title>{{ title }}</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
@@ -11,36 +11,61 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body data-refresh-seconds="{{ refresh_seconds }}" data-csrf="{{ csrf }}" data-default-theme="{{ default_theme }}">
-  <header class="app-bar">
-    <div class="app-title"><span class="material-symbol">visibility</span><div><strong>{{ title }}</strong><small id="last-update">Carregando…</small></div></div>
-    <div class="app-actions">
-      <label class="theme-control" title="Tema"><span class="material-symbol">contrast</span><select id="theme-select"><option value="system">Sistema</option><option value="light">Claro</option><option value="dark">Escuro</option></select></label>
-      <button id="refresh" class="icon-button" title="Atualizar" aria-label="Atualizar"><span class="material-symbol">refresh</span></button>
-      <a class="icon-button" href="/settings" title="Configurações" aria-label="Configurações"><span class="material-symbol">settings</span></a>
-      <button id="logout" class="icon-button" title="Sair" aria-label="Sair"><span class="material-symbol">logout</span></button>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M3 6.5h18v11H3zM6 9v6m4-6v6m4-6v6m4-6v6"/></svg>
+      </div>
+      <div class="brand-copy">
+        <strong>{{ title }}</strong>
+        <small id="last-update">Carregando dados…</small>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <label class="theme-picker" title="Tema da interface">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-.7-.08-1.38-.23-2.03A7 7 0 0 1 12 3Z"/></svg>
+        <select id="theme-select" aria-label="Tema"><option value="system">Sistema</option><option value="light">Claro</option><option value="dark">Escuro</option></select>
+      </label>
+      <button id="refresh" class="icon-button" type="button" title="Atualizar dados" aria-label="Atualizar dados">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 5v6h-6"/></svg>
+      </button>
+      <a class="icon-button" href="/settings" title="Configurações" aria-label="Configurações">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="m19.4 15 .1.1-1.8 3.1-.2-.1a2 2 0 0 0-2.3.2l-.1.1-.7 2.1h-3.6l-.1-.2a2 2 0 0 0-1.8-1.4h-.2l-2 .9-1.8-3.1.1-.2a2 2 0 0 0-.4-2.3l-.1-.1-2.1-.4v-3.6l.2-.1A2 2 0 0 0 4 8.2V8l-1-1.8 1.8-3.1.2.1a2 2 0 0 0 2.3-.2l.1-.1.7-2.1h3.6l.1.2A2 2 0 0 0 13.6 2h.2l2-.9 1.8 3.1-.1.2a2 2 0 0 0 .4 2.3l.1.1 2.1.4v3.6l-.2.1a2 2 0 0 0-1.4 1.8v.2l.9 2Z"/></svg>
+      </a>
+      <button id="logout" class="icon-button" type="button" title="Sair" aria-label="Sair">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M14 3h6v18h-6"/></svg>
+      </button>
     </div>
   </header>
 
-  <main class="shell">
-    <section id="source-status" class="source-status"></section>
-
-    <nav class="tabs" aria-label="Seções">
-      <button class="tab active" data-tab="monitoring">Monitoramento</button>
-      <button class="tab" data-tab="backups">Backups</button>
-    </nav>
-
-    <section class="filter-bar">
-      <label class="search-box"><span class="material-symbol">search</span><input id="search" type="search" placeholder="Pesquisar nome, ID, IP, PVE ou nota" autocomplete="off"></label>
-      <select id="filter-state" aria-label="Status"><option value="all">Todos os status</option><option value="running">Ligados</option><option value="stopped">Desligados</option></select>
-      <select id="filter-pve" aria-label="PVE"><option value="all">Todos os PVE</option></select>
-      <button id="clear-filters" class="text-button">Limpar</button>
+  <main class="dashboard-shell">
+    <section class="overview-grid" aria-label="Resumo">
+      <article class="stat-panel"><span>Total</span><strong id="metric-total">—</strong><small>VMs e CTs</small></article>
+      <article class="stat-panel"><span>Ligados</span><strong id="metric-running">—</strong><small>em execução</small></article>
+      <article class="stat-panel"><span>Desligados</span><strong id="metric-stopped">—</strong><small>parados</small></article>
+      <article class="stat-panel status-panel"><span>Fontes</span><div id="source-status" class="source-status"></div></article>
     </section>
 
-    <section id="monitoring-panel" class="tab-panel active">
-      <section class="summary-strip">
-        <span><b id="metric-total">—</b> Total</span><span><b id="metric-running">—</b> Ligados</span><span><b id="metric-stopped">—</b> Desligados</span><span id="vm-count"></span>
-      </section>
-      <section class="data-card">
+    <section class="workspace-panel">
+      <div class="workspace-header">
+        <nav class="tabs" aria-label="Seções do dashboard">
+          <button class="tab active" data-tab="monitoring" type="button">Monitoramento</button>
+          <button class="tab" data-tab="backups" type="button">Backups</button>
+        </nav>
+        <span id="vm-count" class="result-count"></span>
+      </div>
+
+      <div class="toolbar">
+        <label class="search-field">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+          <input id="search" type="search" placeholder="Pesquisar nome, ID, IP, PVE ou nota" autocomplete="off">
+        </label>
+        <select id="filter-state" aria-label="Filtrar por status"><option value="all">Todos os status</option><option value="running">Ligados</option><option value="stopped">Desligados</option></select>
+        <select id="filter-pve" aria-label="Filtrar por PVE"><option value="all">Todos os PVEs</option></select>
+        <button id="clear-filters" class="secondary-button" type="button">Limpar</button>
+      </div>
+
+      <section id="monitoring-panel" class="tab-panel active">
         <div class="table-wrap">
           <table class="dense-table">
             <thead><tr><th>Status</th><th>ID</th><th>Nome</th><th>Ações</th><th>IP</th><th>Uso</th><th>Uptime</th><th>PVE</th><th class="notes-col">Notas</th></tr></thead>
@@ -48,28 +73,34 @@
           </table>
         </div>
       </section>
-    </section>
 
-    <section id="backups-panel" class="tab-panel">
-      <section class="data-card">
+      <section id="backups-panel" class="tab-panel">
         <div class="table-wrap">
-          <table class="dense-table"><thead><tr><th>Status</th><th>ID</th><th>Nome</th><th>Último backup</th><th>Datastore</th><th>PVE</th></tr></thead><tbody id="backup-table"></tbody></table>
+          <table class="dense-table backup-table"><thead><tr><th>Status</th><th>ID</th><th>Nome</th><th>Último backup</th><th>Datastore</th><th>PVE</th></tr></thead><tbody id="backup-table"></tbody></table>
         </div>
       </section>
     </section>
-    <p id="error" class="error" hidden></p>
+    <p id="error" class="error-banner" hidden></p>
   </main>
 
-  <dialog id="power-dialog" class="md-dialog">
-    <form id="power-form">
-      <header><h2 id="power-title">Operação</h2><button type="button" class="icon-button" data-close-dialog="power-dialog"><span class="material-symbol">close</span></button></header>
-      <p id="power-description" class="muted"></p>
-      <div class="form-grid"><label>Usuário<input id="power-user" required autocomplete="username"></label><label>Realm<select id="power-realm"><option value="pam">pam</option><option value="pve">pve</option></select></label><label>Senha<input id="power-password" type="password" required autocomplete="current-password"></label><label>2FA opcional<input id="power-otp" autocomplete="one-time-code"></label></div>
-      <footer><button type="button" class="text-button" data-close-dialog="power-dialog">Cancelar</button><button type="submit" class="primary-button">Confirmar</button></footer>
+  <dialog id="power-dialog" class="dialog">
+    <form id="power-form" class="dialog-form">
+      <header class="dialog-header"><div><span class="dialog-kicker">Operação Proxmox</span><h2 id="power-title">Operação</h2></div><button type="button" class="icon-button" data-close-dialog="power-dialog" aria-label="Fechar"><svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
+      <div class="dialog-body">
+        <p id="power-description" class="muted"></p>
+        <div class="form-grid"><label>Usuário<input id="power-user" required autocomplete="username"></label><label>Realm<select id="power-realm"><option value="pam">pam</option><option value="pve">pve</option></select></label><label>Senha<input id="power-password" type="password" required autocomplete="current-password"></label><label>2FA opcional<input id="power-otp" autocomplete="one-time-code"></label></div>
+      </div>
+      <footer class="dialog-footer"><button type="button" class="secondary-button" data-close-dialog="power-dialog">Cancelar</button><button type="submit" class="primary-button">Confirmar</button></footer>
     </form>
   </dialog>
 
-  <dialog id="note-dialog" class="md-dialog"><form id="note-form"><header><h2 id="note-title">Nota</h2><button type="button" class="icon-button" data-close-dialog="note-dialog"><span class="material-symbol">close</span></button></header><textarea id="note-text" maxlength="4000" rows="7"></textarea><footer><button id="note-delete" type="button" class="danger-text">Excluir</button><span></span><button type="button" class="text-button" data-close-dialog="note-dialog">Cancelar</button><button type="submit" class="primary-button">Salvar</button></footer></form></dialog>
+  <dialog id="note-dialog" class="dialog note-dialog">
+    <form id="note-form" class="dialog-form">
+      <header class="dialog-header"><div><span class="dialog-kicker">Anotação operacional</span><h2 id="note-title">Nota</h2></div><button type="button" class="icon-button" data-close-dialog="note-dialog" aria-label="Fechar"><svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
+      <div class="dialog-body"><label class="note-field">Nota<textarea id="note-text" maxlength="4000" rows="9" placeholder="Responsável, finalidade, dependências, observações ou pendências…"></textarea><small><span id="note-counter">0</span>/4000 caracteres</small></label></div>
+      <footer class="dialog-footer"><button id="note-delete" type="button" class="danger-button">Excluir nota</button><span class="dialog-spacer"></span><button type="button" class="secondary-button" data-close-dialog="note-dialog">Cancelar</button><button type="submit" class="primary-button">Salvar nota</button></footer>
+    </form>
+  </dialog>
 
   <div id="toast" class="toast" hidden></div>
   <script src="/static/app.js" defer></script>

@@ -29,7 +29,9 @@ class VmInfo(BaseModel):
     ip: str | None = None
     note: str = ""
     cpu_percent: int = Field(default=0, ge=0, le=100)
+    cpu_total_cores: float = Field(default=0, ge=0)
     ram_percent: int = Field(default=0, ge=0, le=100)
+    ram_total_bytes: int = Field(default=0, ge=0)
     uptime_seconds: int = Field(default=0, ge=0)
     uptime_display: str = "—"
     state: GuestState = "unknown"

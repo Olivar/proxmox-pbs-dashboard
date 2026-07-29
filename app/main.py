@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -21,7 +21,7 @@ from app.operations import router as operations_router
 from app.pbs import PbsClient
 from app.proxmox import ProxmoxClient
 from app.service import DashboardService
-from app.settings_store import masked_settings, write_env
+from app.settings_store import masked_pve_settings, masked_settings, write_env
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -35,6 +35,7 @@ class LoginRequest(BaseModel):
 
 class SettingsUpdate(BaseModel):
     values: dict[str, str]
+    pves: list[dict[str, Any]]
 
 
 async def refresh_loop(service: DashboardService, interval: int) -> None:
@@ -137,13 +138,26 @@ async def index(request: Request) -> HTMLResponse:
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request) -> HTMLResponse:
     settings = request.app.state.settings
-    return TEMPLATES.TemplateResponse(request=request, name="settings.html", context={"title": settings.dashboard_title, "values": masked_settings(settings.dashboard_env_file), "csrf": request.state.session.csrf, "default_theme": settings.dashboard_default_theme})
+    return TEMPLATES.TemplateResponse(
+        request=request,
+        name="settings.html",
+        context={
+            "title": settings.dashboard_title,
+            "values": masked_settings(settings.dashboard_env_file),
+            "pves": masked_pve_settings(settings.load_pve_instances()),
+            "csrf": request.state.session.csrf,
+            "default_theme": settings.dashboard_default_theme,
+        },
+    )
 
 
 @app.put("/api/settings")
 async def save_settings(body: SettingsUpdate, request: Request) -> dict[str, object]:
+    settings = request.app.state.settings
     try:
-        write_env(request.app.state.settings.dashboard_env_file, body.values)
+        write_env(settings.dashboard_env_file, body.values, body.pves, settings.load_pve_instances())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Falha ao gravar ENV: {exc}") from exc
     return {"ok": True, "restart_required": True}
