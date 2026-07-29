@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore")
 
     dashboard_title: str = "Proxmox / PBS"
+    dashboard_username: str = "admin"
+    dashboard_password: str = "admin"
+    dashboard_session_secret: str = "change-this-session-secret"
+    dashboard_default_theme: Literal["system", "light", "dark"] = "system"
+    dashboard_env_file: Path = Path("/etc/proxmox-pbs-dashboard/dashboard.env")
     listen_host: str = "0.0.0.0"
     listen_port: int = Field(default=8080, ge=1, le=65535)
     refresh_seconds: int = Field(default=60, ge=15, le=3600)
@@ -55,6 +60,14 @@ class Settings(BaseSettings):
     ip_cache_file: Path = Path("/var/lib/proxmox-pbs-dashboard/ip-cache.json")
     notes_file: Path = Path("/var/lib/proxmox-pbs-dashboard/notes.json")
     excluded_interface_prefixes: str = "lo,docker,veth,br-,virbr,podman,cni,tun,tap,wg,tailscale,zt"
+
+    @field_validator("dashboard_username", "dashboard_password", "dashboard_session_secret")
+    @classmethod
+    def required_dashboard_value(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("value cannot be empty")
+        return value
 
     @field_validator("pve_token_id", "pve_token_secret")
     @classmethod
