@@ -19,7 +19,8 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   useradd --system --home-dir "$STATE_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 
-install -d -o root -g root -m 0755 "$APP_DIR" "$CONFIG_DIR"
+install -d -o root -g root -m 0755 "$APP_DIR"
+install -d -o root -g "$SERVICE_USER" -m 0770 "$CONFIG_DIR"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$STATE_DIR"
 
 if [[ "$SOURCE_DIR" != "$APP_DIR" ]]; then
