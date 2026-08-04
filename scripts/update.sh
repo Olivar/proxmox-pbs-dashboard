@@ -17,6 +17,8 @@ cd "$APP_DIR"
 git pull --ff-only
 .venv/bin/pip install -r requirements.txt
 
+install -d -o root -g "$SERVICE_USER" -m 0770 "$CONFIG_DIR"
+
 if [[ -f "$ENV_FILE" ]]; then
   if ! grep -q '^DASHBOARD_USERNAME=' "$ENV_FILE"; then printf '\nDASHBOARD_USERNAME=admin\n' >> "$ENV_FILE"; fi
   if ! grep -q '^DASHBOARD_PASSWORD=' "$ENV_FILE"; then
