@@ -18,11 +18,11 @@ class ProxmoxError(RuntimeError):
 
 
 class ProxmoxClient:
-    def __init__(self, settings: Settings, instance: PveInstance, ip_cache: IpCache, notes: NoteStore) -> None:
+    def __init__(self, settings: Settings, instance: PveInstance, ip_cache: IpCache, notes: NoteStore | None = None) -> None:
         self.settings = settings
         self.instance = instance
         self.ip_cache = ip_cache
-        self.notes = notes
+        self.notes = notes or NoteStore(settings.notes_file)
         self.client = httpx.AsyncClient(
             base_url=instance.base_url,
             timeout=settings.request_timeout_seconds,

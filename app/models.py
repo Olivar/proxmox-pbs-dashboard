@@ -24,7 +24,7 @@ class VmInfo(BaseModel):
     kind_display: str = "VM"
     pve_id: str
     pve_name: str
-    pve_url: str
+    pve_url: str = ""
     node: str
     ip: str | None = None
     note: str = ""
