@@ -10,6 +10,7 @@ APP_DIR=/opt/proxmox-pbs-dashboard
 CONFIG_DIR=/etc/proxmox-pbs-dashboard
 ENV_FILE="$CONFIG_DIR/dashboard.env"
 LEGACY_PVE_FILE="$CONFIG_DIR/pve-instances.json"
+SERVICE_FILE=/etc/systemd/system/proxmox-pbs-dashboard.service
 SERVICE_USER=proxmox-dashboard
 
 cd "$APP_DIR"
@@ -46,6 +47,8 @@ PY
   chmod 0660 "$ENV_FILE"
 fi
 
+install -m 0644 "$APP_DIR/deploy/proxmox-pbs-dashboard.service" "$SERVICE_FILE"
+systemctl daemon-reload
 systemctl restart proxmox-pbs-dashboard
 sleep 2
 systemctl --no-pager --full status proxmox-pbs-dashboard
