@@ -8,7 +8,7 @@ const elements = {
   search: $("search"), status: $("filter-state"), pve: $("filter-pve"), clear: $("clear-filters"), refresh: $("refresh"), logout: $("logout"), theme: $("theme-select"),
   lastUpdate: $("last-update"), sourceStatus: $("source-status"), vmTable: $("vm-table"), backupTable: $("backup-table"), vmCount: $("vm-count"), error: $("error"),
   metricTotal: $("metric-total"), metricRunning: $("metric-running"), metricStopped: $("metric-stopped"), toast: $("toast"), noteDialog: $("note-dialog"), noteForm: $("note-form"), noteTitle: $("note-title"), noteText: $("note-text"), noteDelete: $("note-delete"), noteCounter: $("note-counter"),
-  powerDialog: $("power-dialog"), powerForm: $("power-form"), powerTitle: $("power-title"), powerDescription: $("power-description")
+  powerDialog: $("power-dialog"), powerForm: $("power-form"), powerTitle: $("power-title"), powerDescription: $("power-description"), resourceDialog: $("resource-dialog"), resourceTitle: $("resource-title"), resourceBody: $("resource-body")
 };
 
 const ICONS = {
@@ -37,7 +37,22 @@ const filtered = () => {
 
 const statusBadge = (guest) => `<span class="status status-${escapeHtml(guest.state)}"><i></i>${escapeHtml(guest.state_display)}</span>`;
 const pveLink = (guest) => `<a href="${escapeHtml(guest.pve_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(guest.pve_name)}</a>`;
-const usage = (guest) => `<div class="usage-stack"><span><b>CPU</b> ${guest.cpu_percent}% de ${escapeHtml(formatCores(guest.cpu_total_cores))}</span><span><b>RAM</b> ${guest.ram_percent}% de ${escapeHtml(formatBytes(guest.ram_total_bytes))}</span></div>`;
+const normalizeUsage = (value) => Math.min(100, Math.max(0, Number(value) || 0));
+const usageLevel = (value) => { const percent = normalizeUsage(value); return percent >= 80 ? "high" : percent >= 60 ? "medium" : "low"; };
+const usageLine = (label, value, total) => {
+  const percent = normalizeUsage(value);
+  return `<span class="usage-line usage-${usageLevel(percent)}"><b>${label}</b><span class="usage-indicator" aria-hidden="true"><i style="width:${percent}%"></i></span><strong>${percent}%</strong><small>de ${escapeHtml(total)}</small></span>`;
+};
+const usage = (guest) => `<div class="usage-stack">${usageLine("CPU", guest.cpu_percent, formatCores(guest.cpu_total_cores))}${usageLine("RAM", guest.ram_percent, formatBytes(guest.ram_total_bytes))}</div>`;
+const formatResourceBytes = (bytes) => { const total = Number(bytes || 0); if (!total) return "0 B"; const gib = total / 1073741824; return `${new Intl.NumberFormat("pt-BR", {maximumFractionDigits: gib < 10 ? 1 : 0}).format(gib)} GB`; };
+const formatLoad = (value) => value == null ? "—" : new Intl.NumberFormat("pt-BR", {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(Number(value));
+const resourceMetric = (label, percent, detail) => { const normalized = normalizeUsage(percent); return `<article class="resource-metric"><header><strong>${label}</strong><b class="usage-${usageLevel(normalized)}">${normalized}%</b></header><div class="resource-bar"><i class="usage-${usageLevel(normalized)}" style="width:${normalized}%"></i></div><small>${detail}</small></article>`; };
+const renderResourceSummary = (summary) => {
+  const nodeLabel = `${summary.online_node_count} de ${summary.node_count} nós online`;
+  const nodes = (summary.nodes || []).map((node) => `<article class="resource-node"><header><strong>${escapeHtml(node.node)}</strong><span class="node-state node-${escapeHtml(node.status)}">${escapeHtml(node.status)}</span></header><div class="resource-node-grid"><span>CPU <b class="usage-${usageLevel(node.cpu_percent)}">${node.cpu_percent}%</b></span><span>RAM <b class="usage-${usageLevel(node.ram_percent)}">${node.ram_percent}%</b></span><span>Disco <b class="usage-${usageLevel(node.disk_percent)}">${node.disk_percent}%</b></span><span>Load <b>${formatLoad(node.load_average)}</b></span><span>Uptime <b>${escapeHtml(node.uptime_display)}</b></span></div></article>`).join("");
+  elements.resourceTitle.textContent = summary.pve_name;
+  elements.resourceBody.innerHTML = `<div class="resource-overview"><span class="muted">${escapeHtml(nodeLabel)}</span><span class="muted">Atualizado: ${formatDate(summary.updated_at)}</span></div><div class="resource-metrics">${resourceMetric("CPU", summary.cpu_percent, `${summary.cpu_total_cores} cores disponíveis`)}${resourceMetric("RAM", summary.ram_percent, `${formatResourceBytes(summary.ram_used_bytes)} de ${formatResourceBytes(summary.ram_total_bytes)}`)}${resourceMetric("Disco", summary.disk_percent, `${formatResourceBytes(summary.disk_used_bytes)} de ${formatResourceBytes(summary.disk_total_bytes)}`)}</div><section class="resource-nodes"><h3>Nós</h3>${nodes || '<p class="muted">Nenhum nó retornado.</p>'}</section>`;
+};
 const actionButtons = (guest) => guest.state === "stopped"
   ? `<button class="row-icon play" data-power="start" data-pve="${escapeHtml(guest.pve_id)}" data-vmid="${guest.vmid}" title="Iniciar" aria-label="Iniciar">${ICONS.play}</button>`
   : `<button class="row-icon stop" data-power="shutdown" data-pve="${escapeHtml(guest.pve_id)}" data-vmid="${guest.vmid}" title="Desligar" aria-label="Desligar">${ICONS.stop}</button><button class="row-icon restart" data-power="reboot" data-pve="${escapeHtml(guest.pve_id)}" data-vmid="${guest.vmid}" title="Reiniciar" aria-label="Reiniciar">${ICONS.restart}</button>`;
@@ -61,7 +76,8 @@ function render() {
   elements.vmTable.innerHTML = guests.length ? guests.map((guest) => `<tr><td data-label="Status">${statusBadge(guest)}</td><td data-label="ID" class="mono">${guest.vmid}</td><td data-label="Nome"><div class="guest-name"><strong>${escapeHtml(guest.name)}</strong><small>${escapeHtml(guest.kind_display)}</small></div></td><td data-label="Ações"><div class="row-actions">${actionButtons(guest)}</div></td><td data-label="IP">${guest.ip ? `<button class="ip-link" data-ip="${escapeHtml(guest.ip)}">${escapeHtml(guest.ip)}</button>` : "—"}</td><td data-label="Uso">${usage(guest)}</td><td data-label="Uptime" class="mono">${escapeHtml(guest.uptime_display)}</td><td data-label="PVE">${pveLink(guest)}</td><td data-label="Notas">${noteButton(guest)}</td></tr>`).join("") : `<tr><td colspan="9" class="empty">Nenhum item encontrado.</td></tr>`;
   elements.backupTable.innerHTML = guests.length ? guests.map((guest) => `<tr><td data-label="Status">${backupStatus(guest.backup.status)}</td><td data-label="ID" class="mono">${guest.vmid}</td><td data-label="Nome"><strong>${escapeHtml(guest.name)}</strong></td><td data-label="Último backup">${formatDate(guest.backup.last_backup)}</td><td data-label="Datastore">${escapeHtml(guest.backup.datastore || "—")}</td><td data-label="PVE">${pveLink(guest)}</td></tr>`).join("") : `<tr><td colspan="6" class="empty">Nenhum item encontrado.</td></tr>`;
   elements.lastUpdate.textContent = `${state.payload.stale ? "Dados em cache" : "Atualizado"}: ${formatDate(state.payload.updated_at)}`;
-  elements.sourceStatus.innerHTML = [...state.payload.pve.map((source) => `<span class="source ${source.ok ? "ok" : "error"}" title="${escapeHtml(source.error || "Online")}"><i></i>${escapeHtml(source.source_name || "PVE")}</span>`), `<span class="source ${state.payload.pbs.ok ? "ok" : "error"}" title="${escapeHtml(state.payload.pbs.error || "Online")}"><i></i>PBS</span>`].join("");
+  const pbsSources = Array.isArray(state.payload.pbs) ? state.payload.pbs : [state.payload.pbs].filter(Boolean);
+  elements.sourceStatus.innerHTML = [...state.payload.pve.map((source) => `<button type="button" class="source source-button ${source.ok ? "ok" : "error"}" data-pve-summary="${escapeHtml(source.source_id || "")}" title="${escapeHtml(source.error || "Ver resumo de recursos")}"><i></i>${escapeHtml(source.source_name || "PVE")}</button>`), ...pbsSources.map((source) => `<span class="source ${source.ok ? "ok" : "error"}" title="${escapeHtml(source.error || "Online")}"><i></i>${escapeHtml(source.source_name || "PBS")}</span>`)].join("");
 }
 
 async function load(force = false) {
@@ -83,6 +99,15 @@ function findGuest(pve, vmid) { return state.payload?.vms.find((guest) => guest.
 function openPower(guest, action) { if (!guest) return; state.powerGuest = guest; state.powerAction = action; const labels = {start: "Iniciar", shutdown: "Desligar", reboot: "Reiniciar"}; elements.powerTitle.textContent = labels[action]; elements.powerDescription.textContent = `${labels[action]} ${guest.kind_display} ${guest.vmid} — ${guest.name}?`; elements.powerForm.reset(); elements.powerDialog.showModal(); }
 function updateNoteCounter() { elements.noteCounter.textContent = String(elements.noteText.value.length); }
 function openNote(guest) { if (!guest) return; state.noteGuest = guest; elements.noteTitle.textContent = `${guest.vmid} — ${guest.name}`; elements.noteText.value = guest.note || ""; elements.noteDelete.hidden = !guest.note; updateNoteCounter(); elements.noteDialog.showModal(); elements.noteText.focus(); }
+async function openPveSummary(pveId) {
+  if (!pveId) return;
+  const source = state.payload?.pve.find((item) => item.source_id === pveId);
+  elements.resourceTitle.textContent = source?.source_name || "Recursos do PVE";
+  elements.resourceBody.innerHTML = '<p class="muted">Carregando recursos do servidor…</p>';
+  elements.resourceDialog.showModal();
+  try { renderResourceSummary(await api(`/api/pve/${encodeURIComponent(pveId)}/summary`)); }
+  catch (error) { elements.resourceBody.innerHTML = `<p class="error-banner">${escapeHtml(error.message)}</p>`; }
+}
 
 async function copyIp(value) {
   try { await navigator.clipboard.writeText(value); }
@@ -91,6 +116,7 @@ async function copyIp(value) {
 }
 
 document.addEventListener("click", async (event) => {
+  const pveSummary = event.target.closest("[data-pve-summary]"); if (pveSummary) { await openPveSummary(pveSummary.dataset.pveSummary); return; }
   const power = event.target.closest("[data-power]"); if (power) openPower(findGuest(power.dataset.pve, power.dataset.vmid), power.dataset.power);
   const note = event.target.closest("[data-note]"); if (note) openNote(findGuest(note.dataset.pve, note.dataset.vmid));
   const ip = event.target.closest("[data-ip]"); if (ip) await copyIp(ip.dataset.ip);

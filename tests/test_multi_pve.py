@@ -102,6 +102,11 @@ class FakePbsClient:
         }
 
 
+class FailingPbsClient:
+    async def get_backups(self) -> dict[int, BackupInfo]:
+        raise ConnectionError("All connection attempts failed")
+
+
 @pytest.mark.asyncio
 async def test_service_aggregates_independent_pve_instances(tmp_path: Path) -> None:
     settings = Settings(
@@ -156,3 +161,25 @@ async def test_service_aggregates_independent_pve_instances(tmp_path: Path) -> N
     assert {vm.vmid: vm.backup.status for vm in payload.vms} == {100: "success", 200: "success"}
     assert [source.source_id for source in payload.pve] == ["pve01", "pve02"]
     assert all(source.ok for source in payload.pve)
+
+
+@pytest.mark.asyncio
+async def test_service_does_not_report_missing_backup_when_pbs_is_unavailable(tmp_path: Path) -> None:
+    settings = Settings(
+        pve_url="https://pve.test:8006",
+        pve_token_id="token",
+        pve_token_secret="secret",
+        pve_instances_file=tmp_path / "missing.json",
+        pbs_url="https://pbs.test:8007",
+        pbs_token_id="pbs-token",
+        pbs_token_secret="pbs-secret",
+        pbs_datastores="store",
+    )
+    pve = PveInstance(id="pve", name="PVE", url="https://pve.test:8006", token_id="token", token_secret="secret")
+    client = FakePveClient(pve, [VmInfo(vmid=100, name="SRV", pve_id="pve", pve_name="PVE", node="pve")])
+
+    payload = await DashboardService(settings, [client], FailingPbsClient()).get_dashboard(force=True)  # type: ignore[arg-type]
+
+    assert payload.pbs[0].ok is False
+    assert payload.vms[0].backup.status == "unknown"
+    assert "PBS indisponível" in (payload.vms[0].backup.detail or "")

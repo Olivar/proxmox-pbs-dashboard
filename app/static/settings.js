@@ -2,25 +2,28 @@
 
 const form = document.getElementById("settings-form");
 const message = document.getElementById("settings-message");
-const pveList = document.getElementById("pve-list");
-const template = document.getElementById("pve-template");
+const lists = {
+  pve: {list: document.getElementById("pve-list"), template: document.getElementById("pve-template"), add: document.getElementById("add-pve"), label: "PVE"},
+  pbs: {list: document.getElementById("pbs-list"), template: document.getElementById("pbs-template"), add: document.getElementById("add-pbs"), label: "PBS"}
+};
 
-function refreshCardTitle(card) {
-  const name = card.querySelector('[data-pve="name"]')?.value.trim();
-  const id = card.querySelector('[data-pve="id"]')?.value.trim();
-  card.querySelector(".pve-card-title").textContent = name || id || "Novo PVE";
+function refreshCardTitle(card, type) {
+  const name = card.querySelector(`[data-${type}="name"]`)?.value.trim();
+  const id = card.querySelector(`[data-${type}="id"]`)?.value.trim();
+  card.querySelector(`.${type}-card-title`).textContent = name || id || `Novo ${type.toUpperCase()}`;
 }
 
-function bindCard(card) {
-  card.querySelectorAll("[data-pve]").forEach((field) => field.addEventListener("input", () => refreshCardTitle(card)));
-  card.querySelector(".remove-pve").addEventListener("click", () => {
-    if (pveList.querySelectorAll(".pve-card").length <= 1) {
-      showMessage("É necessário manter pelo menos um PVE.", true);
+function bindCard(card, type) {
+  const config = lists[type];
+  card.querySelectorAll(`[data-${type}]`).forEach((field) => field.addEventListener("input", () => refreshCardTitle(card, type)));
+  card.querySelector(`.remove-${type}`).addEventListener("click", () => {
+    if (config.list.querySelectorAll(`.${type}-card`).length <= 1) {
+      showMessage(`É necessário manter pelo menos um ${config.label}.`, true);
       return;
     }
     card.remove();
   });
-  refreshCardTitle(card);
+  refreshCardTitle(card, type);
 }
 
 function showMessage(text, error = false) {
@@ -29,24 +32,25 @@ function showMessage(text, error = false) {
   message.hidden = false;
 }
 
-function collectPves() {
-  return [...pveList.querySelectorAll(".pve-card")].map((card) => ({
-    id: card.querySelector('[data-pve="id"]').value,
-    name: card.querySelector('[data-pve="name"]').value,
-    url: card.querySelector('[data-pve="url"]').value,
-    token_id: card.querySelector('[data-pve="token_id"]').value,
-    token_secret: card.querySelector('[data-pve="token_secret"]').value,
-    verify_tls: card.querySelector('[data-pve="verify_tls"]').value === "true"
-  }));
+function collectItems(type) {
+  return [...lists[type].list.querySelectorAll(`.${type}-card`)].map((card) => {
+    const value = (name) => card.querySelector(`[data-${type}="${name}"]`).value;
+    return {
+      id: value("id"), name: value("name"), url: value("url"), token_id: value("token_id"), token_secret: value("token_secret"), verify_tls: value("verify_tls") === "true",
+      ...(type === "pbs" ? {datastores: value("datastores"), node: value("node")} : {})
+    };
+  });
 }
 
-pveList.querySelectorAll(".pve-card").forEach(bindCard);
-document.getElementById("add-pve").addEventListener("click", () => {
-  const card = template.content.firstElementChild.cloneNode(true);
-  pveList.append(card);
-  bindCard(card);
-  card.querySelector('[data-pve="id"]').focus();
-});
+for (const [type, config] of Object.entries(lists)) {
+  config.list.querySelectorAll(`.${type}-card`).forEach((card) => bindCard(card, type));
+  config.add.addEventListener("click", () => {
+    const card = config.template.content.firstElementChild.cloneNode(true);
+    config.list.append(card);
+    bindCard(card, type);
+    card.querySelector(`[data-${type}="id"]`).focus();
+  });
+}
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -58,12 +62,17 @@ form.addEventListener("submit", async (event) => {
     const response = await fetch("/api/settings", {
       method: "PUT",
       headers: {"Content-Type": "application/json", "Accept": "application/json", "X-CSRF-Token": document.body.dataset.csrf},
-      body: JSON.stringify({values, pves: collectPves()}),
+      body: JSON.stringify({values, pves: collectItems("pve"), pbses: collectItems("pbs")}),
       cache: "no-store"
     });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || "Falha ao salvar");
-    showMessage("Configurações salvas. Reinicie o serviço para aplicar.");
+    if (!response.ok) {
+      const detail = Array.isArray(payload.detail)
+        ? payload.detail.map((item) => `${Array.isArray(item.loc) ? item.loc.join(".") : "campo"}: ${item.msg || "valor inválido"}`).join("; ")
+        : payload.detail;
+      throw new Error(detail || "Falha ao salvar");
+    }
+    showMessage("Configurações salvas. O serviço está reiniciando para aplicar as alterações.");
   } catch (error) {
     showMessage(error.message, true);
   } finally {

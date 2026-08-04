@@ -5,7 +5,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.config import Settings
+from app.config import PveInstance, Settings
 from app.ip_cache import IpCache
 from app.pbs import PbsClient
 from app.proxmox import ProxmoxClient
@@ -75,6 +75,56 @@ async def test_pve_client_collects_vm_and_guest_ip(tmp_path: Path) -> None:
     assert vms[0].ip == "192.168.10.20"
     assert vms[0].uptime_display == "1d 01h 01m"
     assert vms[0].state_display == "Ligado"
+
+
+@pytest.mark.asyncio
+async def test_pve_client_collects_node_summary(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    instance = PveInstance(
+        id="pve01",
+        name="PVE Principal",
+        url="https://pve.test:8006",
+        token_id="dashboard@pve!readonly",
+        token_secret="pve-secret",
+        verify_tls=False,
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "PVEAPIToken=dashboard@pve!readonly=pve-secret"
+        if request.url.path == "/api2/json/nodes":
+            return httpx.Response(200, json={"data": [
+                {
+                    "node": "pve01",
+                    "status": "online",
+                    "cpu": 0.25,
+                    "maxcpu": 4,
+                    "mem": 4 * 1024**3,
+                    "maxmem": 8 * 1024**3,
+                    "disk": 20 * 1024**3,
+                    "maxdisk": 40 * 1024**3,
+                    "uptime": 90061,
+                    "loadavg": ["0.50", "0.20", "0.10"],
+                }
+            ]})
+        return httpx.Response(404)
+
+    client = ProxmoxClient(settings, instance, IpCache(settings.ip_cache_file))
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(
+        base_url=instance.base_url,
+        transport=httpx.MockTransport(handler),
+        headers={"Authorization": "PVEAPIToken=dashboard@pve!readonly=pve-secret"},
+    )
+    try:
+        summary = await client.get_summary()
+    finally:
+        await client.close()
+
+    assert summary.cpu_percent == 25
+    assert summary.ram_percent == 50
+    assert summary.disk_percent == 50
+    assert summary.cpu_total_cores == 4
+    assert summary.nodes[0].load_average == 0.5
 
 
 @pytest.mark.asyncio

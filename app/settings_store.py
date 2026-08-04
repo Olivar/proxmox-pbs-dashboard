@@ -9,7 +9,7 @@ from typing import Any
 
 from dotenv import dotenv_values
 
-from app.config import PveInstance, validate_pve_instances
+from app.config import PbsInstance, PveInstance, validate_pbs_instances, validate_pve_instances
 
 ALLOWED_KEYS = (
     "DASHBOARD_TITLE",
@@ -18,6 +18,7 @@ ALLOWED_KEYS = (
     "DASHBOARD_SESSION_SECRET",
     "DASHBOARD_DEFAULT_THEME",
     "REFRESH_SECONDS",
+    "PBS_INSTANCES_JSON",
     "PBS_URL",
     "PBS_TOKEN_ID",
     "PBS_TOKEN_SECRET",
@@ -28,6 +29,7 @@ ALLOWED_KEYS = (
 SECRET_KEYS = {"DASHBOARD_PASSWORD", "DASHBOARD_SESSION_SECRET", "PBS_TOKEN_SECRET"}
 MASK = "********"
 PVE_KEY = "PVE_INSTANCES_JSON"
+PBS_KEY = "PBS_INSTANCES_JSON"
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -57,12 +59,32 @@ def masked_pve_settings(instances: list[PveInstance]) -> list[dict[str, Any]]:
     ]
 
 
+def masked_pbs_settings(instances: list[PbsInstance]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": item.id,
+            "name": item.name,
+            "url": item.base_url,
+            "token_id": item.token_id,
+            "token_secret": MASK,
+            "datastores": item.datastores,
+            "node": item.node,
+            "verify_tls": item.verify_tls,
+        }
+        for item in instances
+    ]
+
+
 def write_env(
     path: Path,
     updates: dict[str, str],
     pve_updates: list[dict[str, Any]],
     current_instances: list[PveInstance],
+    pbs_updates: list[dict[str, Any]] | None = None,
+    current_pbs_instances: list[PbsInstance] | None = None,
 ) -> None:
+    pbs_updates = pbs_updates or []
+    current_pbs_instances = current_pbs_instances or []
     current = read_env(path)
     for key in ALLOWED_KEYS:
         if key not in updates:
@@ -96,6 +118,33 @@ def write_env(
     validated = validate_pve_instances(normalized_payload, PVE_KEY)
     current[PVE_KEY] = json.dumps([item.model_dump(mode="json") for item in validated], ensure_ascii=False, separators=(",", ":"))
 
+    if pbs_updates:
+        current_pbs_by_id = {item.id.casefold(): item for item in current_pbs_instances}
+        normalized_pbs_payload: list[dict[str, Any]] = []
+        for index, raw in enumerate(pbs_updates, start=1):
+            pbs_id = str(raw.get("id", "")).strip()
+            existing = current_pbs_by_id.get(pbs_id.casefold())
+            secret = str(raw.get("token_secret", "")).strip()
+            if secret in {"", MASK}:
+                if existing is None:
+                    raise ValueError(f"Informe o token secret do novo PBS #{index}")
+                secret = existing.token_secret
+            normalized_pbs_payload.append(
+                {
+                    "id": pbs_id,
+                    "name": str(raw.get("name", "")).strip(),
+                    "url": str(raw.get("url", "")).strip(),
+                    "token_id": str(raw.get("token_id", "")).strip(),
+                    "token_secret": secret,
+                    "datastores": str(raw.get("datastores", "")).strip(),
+                    "node": str(raw.get("node", "localhost")).strip() or "localhost",
+                    "verify_tls": bool(raw.get("verify_tls", True)),
+                }
+            )
+
+        validated_pbs = validate_pbs_instances(normalized_pbs_payload, PBS_KEY)
+        current[PBS_KEY] = json.dumps([item.model_dump(mode="json") for item in validated_pbs], ensure_ascii=False, separators=(",", ":"))
+
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         backup = path.with_name(f"{path.name}.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
@@ -121,7 +170,7 @@ def write_env(
     except FileNotFoundError:
         pass
 
-    for key in (*ALLOWED_KEYS, PVE_KEY):
+    for key in (*ALLOWED_KEYS, PVE_KEY, PBS_KEY):
         if key in current and key not in seen:
             output.append(format_env_line(key, current[key]))
 

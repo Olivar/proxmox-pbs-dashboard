@@ -46,13 +46,47 @@ class SourceHealth(BaseModel):
     error: str | None = None
 
 
+class PveNodeSummary(BaseModel):
+    node: str
+    status: str = "unknown"
+    cpu_percent: int = Field(default=0, ge=0, le=100)
+    cpu_total_cores: int = Field(default=0, ge=0)
+    ram_percent: int = Field(default=0, ge=0, le=100)
+    ram_used_bytes: int = Field(default=0, ge=0)
+    ram_total_bytes: int = Field(default=0, ge=0)
+    disk_percent: int = Field(default=0, ge=0, le=100)
+    disk_used_bytes: int = Field(default=0, ge=0)
+    disk_total_bytes: int = Field(default=0, ge=0)
+    uptime_seconds: int = Field(default=0, ge=0)
+    uptime_display: str = "â€”"
+    load_average: float | None = Field(default=None, ge=0)
+
+
+class PveSummary(BaseModel):
+    pve_id: str
+    pve_name: str
+    pve_url: str
+    updated_at: datetime
+    node_count: int = Field(default=0, ge=0)
+    online_node_count: int = Field(default=0, ge=0)
+    cpu_percent: int = Field(default=0, ge=0, le=100)
+    cpu_total_cores: int = Field(default=0, ge=0)
+    ram_percent: int = Field(default=0, ge=0, le=100)
+    ram_used_bytes: int = Field(default=0, ge=0)
+    ram_total_bytes: int = Field(default=0, ge=0)
+    disk_percent: int = Field(default=0, ge=0, le=100)
+    disk_used_bytes: int = Field(default=0, ge=0)
+    disk_total_bytes: int = Field(default=0, ge=0)
+    nodes: list[PveNodeSummary] = Field(default_factory=list)
+
+
 class DashboardPayload(BaseModel):
     title: str
     updated_at: datetime
     stale: bool = False
     vms: list[VmInfo]
     pve: list[SourceHealth]
-    pbs: SourceHealth
+    pbs: list[SourceHealth]
 
 
 class NoteUpdate(BaseModel):

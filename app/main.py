@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -15,13 +16,14 @@ from pydantic import BaseModel, Field
 from app.auth import COOKIE_NAME, create_session, read_session, require_csrf, verify_password
 from app.config import get_settings
 from app.ip_cache import IpCache
-from app.models import DashboardPayload, NoteUpdate
+from app.models import DashboardPayload, NoteUpdate, PveSummary
 from app.note_store import NoteStore
 from app.operations import router as operations_router
 from app.pbs import PbsClient
 from app.proxmox import ProxmoxClient
 from app.service import DashboardService
-from app.settings_store import masked_pve_settings, masked_settings, write_env
+from app.settings_store import masked_pbs_settings, masked_pve_settings, masked_settings, write_env
+from app.version import APP_VERSION
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -36,6 +38,7 @@ class LoginRequest(BaseModel):
 class SettingsUpdate(BaseModel):
     values: dict[str, str]
     pves: list[dict[str, Any]]
+    pbses: list[dict[str, Any]]
 
 
 async def refresh_loop(service: DashboardService, interval: int) -> None:
@@ -47,14 +50,20 @@ async def refresh_loop(service: DashboardService, interval: int) -> None:
         await asyncio.sleep(interval)
 
 
+async def restart_after_settings_save() -> None:
+    # Aguarda a resposta HTTP chegar ao navegador antes de encerrar o worker.
+    await asyncio.sleep(0.8)
+    os._exit(75)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     ip_cache = IpCache(settings.ip_cache_file)
     notes = NoteStore(settings.notes_file)
     pve_clients = [ProxmoxClient(settings, instance, ip_cache, notes) for instance in settings.load_pve_instances()]
-    pbs = PbsClient(settings)
-    service = DashboardService(settings, pve_clients, pbs)
+    pbs_clients = [PbsClient(settings, instance) for instance in settings.load_pbs_instances()]
+    service = DashboardService(settings, pve_clients, pbs_clients)
     app.state.settings = settings
     app.state.service = service
     app.state.notes = notes
@@ -67,7 +76,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         with contextlib.suppress(asyncio.CancelledError):
             await task
         await asyncio.gather(*(client.close() for client in pve_clients), return_exceptions=True)
-        await pbs.close()
+        await asyncio.gather(*(client.close() for client in pbs_clients), return_exceptions=True)
 
 
 app = FastAPI(title="Proxmox PBS Dashboard", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -98,7 +107,7 @@ async def authentication_and_headers(request: Request, call_next) -> Response:
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'"
-    if path.startswith("/api/") or path == "/health":
+    if path.startswith("/api/") or path in {"/health", "/settings"}:
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -132,7 +141,7 @@ async def logout() -> Response:
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     settings = request.app.state.settings
-    return TEMPLATES.TemplateResponse(request=request, name="index.html", context={"title": settings.dashboard_title, "refresh_seconds": settings.refresh_seconds, "default_theme": settings.dashboard_default_theme, "csrf": request.state.session.csrf})
+    return TEMPLATES.TemplateResponse(request=request, name="index.html", context={"title": settings.dashboard_title, "version": APP_VERSION, "refresh_seconds": settings.refresh_seconds, "default_theme": settings.dashboard_default_theme, "csrf": request.state.session.csrf})
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -143,8 +152,10 @@ async def settings_page(request: Request) -> HTMLResponse:
         name="settings.html",
         context={
             "title": settings.dashboard_title,
+            "version": APP_VERSION,
             "values": masked_settings(settings.dashboard_env_file),
             "pves": masked_pve_settings(settings.load_pve_instances()),
+            "pbses": masked_pbs_settings(settings.load_pbs_instances()),
             "csrf": request.state.session.csrf,
             "default_theme": settings.dashboard_default_theme,
         },
@@ -155,12 +166,13 @@ async def settings_page(request: Request) -> HTMLResponse:
 async def save_settings(body: SettingsUpdate, request: Request) -> dict[str, object]:
     settings = request.app.state.settings
     try:
-        write_env(settings.dashboard_env_file, body.values, body.pves, settings.load_pve_instances())
+        write_env(settings.dashboard_env_file, body.values, body.pves, settings.load_pve_instances(), body.pbses, settings.load_pbs_instances())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Falha ao gravar ENV: {exc}") from exc
-    return {"ok": True, "restart_required": True}
+    asyncio.create_task(restart_after_settings_save())
+    return {"ok": True, "restart_required": False, "restarting": True}
 
 
 @app.get("/api/session")
@@ -174,6 +186,17 @@ async def dashboard(request: Request) -> DashboardPayload:
         return await request.app.state.service.get_dashboard()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/pve/{pve_id}/summary", response_model=PveSummary)
+async def pve_summary(pve_id: str, request: Request) -> PveSummary:
+    client = request.app.state.pve_clients.get(pve_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="PVE não encontrado")
+    try:
+        return await client.get_summary()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/api/refresh", response_model=DashboardPayload)
@@ -211,4 +234,4 @@ async def health(request: Request) -> dict[str, object]:
         payload = await request.app.state.service.get_dashboard()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {"ok": all(source.ok for source in payload.pve) and payload.pbs.ok, "pve": [source.model_dump() for source in payload.pve], "pbs": payload.pbs.model_dump(), "updated_at": payload.updated_at, "stale": payload.stale}
+    return {"ok": all(source.ok for source in payload.pve) and all(source.ok for source in payload.pbs), "pve": [source.model_dump() for source in payload.pve], "pbs": [source.model_dump() for source in payload.pbs], "updated_at": payload.updated_at, "stale": payload.stale}

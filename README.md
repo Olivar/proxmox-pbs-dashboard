@@ -219,3 +219,28 @@ cp .env.example .env
 pytest
 uvicorn app.main:app --reload
 ```
+
+## Registro de mudanças
+
+As funcionalidades e decisões implementadas devem ser registradas em [`docs/CHANGELOG.md`](docs/CHANGELOG.md), junto com a versão correspondente.
+
+## Múltiplos PBS
+
+A tela **Configurações** permite adicionar e remover instâncias PBS. Todas são gravadas no campo `PBS_INSTANCES_JSON` do `dashboard.env`:
+
+```json
+[
+  {
+    "id": "pbs01",
+    "name": "PBS Principal",
+    "url": "https://pbs01:8007",
+    "token_id": "dashboard@pbs!readonly",
+    "token_secret": "TOKEN_1",
+    "datastores": "backup-prod,backup-secundario",
+    "node": "localhost",
+    "verify_tls": false
+  }
+]
+```
+
+O formato antigo com `PBS_URL`, `PBS_TOKEN_ID`, `PBS_TOKEN_SECRET` e `PBS_DATASTORES` continua aceito quando `PBS_INSTANCES_JSON` não existir.

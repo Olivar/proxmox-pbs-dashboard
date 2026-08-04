@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
 from app.config import PveInstance, Settings
 from app.ip_cache import IpCache
-from app.models import GuestActionRequest, VmInfo
+from app.models import GuestActionRequest, PveNodeSummary, PveSummary, VmInfo
 from app.note_store import NoteStore
 from app.utils import format_uptime, pick, state_display
 
@@ -97,6 +98,60 @@ class ProxmoxClient:
                 self.ip_cache.set(guest.vmid, resolved_ip)
 
         return sorted(guests, key=lambda guest: (guest.name.casefold(), guest.vmid))
+
+    async def get_summary(self) -> PveSummary:
+        data = await self._get_json("/api2/json/nodes")
+        if not isinstance(data, list):
+            raise ProxmoxError(f"{self.instance.name}: PVE retornou uma lista de nÃ³s invÃ¡lida")
+
+        nodes = [self._parse_node_summary(item) for item in data if isinstance(item, dict) and str(item.get("node") or "").strip()]
+        if not nodes:
+            raise ProxmoxError(f"{self.instance.name}: nenhum nÃ³ foi retornado pelo PVE")
+
+        active_nodes = [node for node in nodes if node.status.casefold() in {"online", "running", "available"}]
+        measured_nodes = active_nodes or nodes
+        total_cores = sum(node.cpu_total_cores for node in measured_nodes)
+        cpu_used = sum(node.cpu_percent * node.cpu_total_cores for node in measured_nodes)
+        ram_total = sum(node.ram_total_bytes for node in measured_nodes)
+        ram_used = sum(node.ram_used_bytes for node in measured_nodes)
+        disk_total = sum(node.disk_total_bytes for node in measured_nodes)
+        disk_used = sum(node.disk_used_bytes for node in measured_nodes)
+
+        return PveSummary(
+            pve_id=self.instance.id,
+            pve_name=self.instance.name,
+            pve_url=self.instance.base_url,
+            updated_at=datetime.now(timezone.utc),
+            node_count=len(nodes),
+            online_node_count=len(active_nodes),
+            cpu_percent=round(cpu_used / total_cores) if total_cores else 0,
+            cpu_total_cores=total_cores,
+            ram_percent=ratio_percent(ram_used, ram_total),
+            ram_used_bytes=ram_used,
+            ram_total_bytes=ram_total,
+            disk_percent=ratio_percent(disk_used, disk_total),
+            disk_used_bytes=disk_used,
+            disk_total_bytes=disk_total,
+            nodes=nodes,
+        )
+
+    def _parse_node_summary(self, item: dict[str, Any]) -> PveNodeSummary:
+        load_average = first_float(pick(item, "loadavg", "load_average", default=None))
+        return PveNodeSummary(
+            node=str(item.get("node") or "—"),
+            status=str(item.get("status") or "unknown"),
+            cpu_percent=percent(item.get("cpu"), scale=100),
+            cpu_total_cores=non_negative_int(pick(item, "maxcpu", "cpuinfo.cpus", default=0)),
+            ram_percent=ratio_percent(item.get("mem"), item.get("maxmem")),
+            ram_used_bytes=non_negative_int(item.get("mem")),
+            ram_total_bytes=non_negative_int(item.get("maxmem")),
+            disk_percent=ratio_percent(item.get("disk"), item.get("maxdisk")),
+            disk_used_bytes=non_negative_int(item.get("disk")),
+            disk_total_bytes=non_negative_int(item.get("maxdisk")),
+            uptime_seconds=non_negative_int(item.get("uptime")),
+            uptime_display=format_uptime(item.get("uptime")),
+            load_average=load_average,
+        )
 
     async def _get_qemu_ip(self, node: str, vmid: int) -> str | None:
         async with self._agent_semaphore:
@@ -244,3 +299,13 @@ def non_negative_int(value: Any) -> int:
         return max(0, int(float(value or 0)))
     except (TypeError, ValueError):
         return 0
+
+
+def first_float(value: Any) -> float | None:
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, number)

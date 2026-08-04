@@ -10,12 +10,15 @@ from app.proxmox import ProxmoxClient, ProxmoxError
 
 
 class DashboardService:
-    def __init__(self, settings: Settings, pve: list[ProxmoxClient], pbs: PbsClient) -> None:
+    def __init__(self, settings: Settings, pve: list[ProxmoxClient], pbs: PbsClient | list[PbsClient]) -> None:
         if not pve:
             raise ValueError("Ao menos uma instância PVE deve ser configurada")
+        pbs_clients = pbs if isinstance(pbs, list) else [pbs]
+        if not pbs_clients:
+            raise ValueError("Ao menos uma instÃ¢ncia PBS deve ser configurada")
         self.settings = settings
         self.pve = pve
-        self.pbs = pbs
+        self.pbs = pbs_clients
         self._lock = asyncio.Lock()
         self._cached: DashboardPayload | None = None
         self._expires_at: datetime | None = None
@@ -31,8 +34,8 @@ class DashboardService:
             return await self._refresh(now)
 
     async def _refresh(self, now: datetime) -> DashboardPayload:
-        results = await asyncio.gather(*(client.get_vms() for client in self.pve), self.pbs.get_backups(), return_exceptions=True)
-        pve_results, pbs_result = results[:-1], results[-1]
+        results = await asyncio.gather(*(client.get_vms() for client in self.pve), *(client.get_backups() for client in self.pbs), return_exceptions=True)
+        pve_results, pbs_results = results[:len(self.pve)], results[len(self.pve):]
         cached_by_source: dict[str, list[VmInfo]] = {}
         if self._cached:
             for vm in self._cached.vms:
@@ -53,18 +56,34 @@ class DashboardService:
             vms.extend(result)
         if successful_sources == 0 and not vms:
             raise ProxmoxError("; ".join(pve_errors) or "Nenhuma instância PVE respondeu")
-        pbs_health = SourceHealth(ok=True, source_id="pbs", source_name="PBS")
-        if isinstance(pbs_result, Exception):
-            pbs_health = SourceHealth(ok=False, source_id="pbs", source_name="PBS", error=str(pbs_result))
-            backups = self._cached_backups()
-        else:
-            backups = pbs_result
+        pbs_health: list[SourceHealth] = []
+        backup_results: list[dict[int, BackupInfo]] = []
+        pbs_errors: list[str] = []
+        for client, result in zip(self.pbs, pbs_results, strict=True):
+            instance = getattr(client, "instance", None)
+            source_id = instance.id if instance else "pbs"
+            source_name = instance.name if instance else "PBS"
+            if isinstance(result, Exception):
+                error = str(result)
+                pbs_errors.append(error)
+                pbs_health.append(SourceHealth(ok=False, source_id=source_id, source_name=source_name, error=error))
+            else:
+                pbs_health.append(SourceHealth(ok=True, source_id=source_id, source_name=source_name))
+                backup_results.append(result)
+        backups = merge_backup_results(backup_results) if backup_results else self._cached_backups()
+        pbs_unavailable = not backup_results
+        unavailable_detail = "PBS indisponível: " + "; ".join(pbs_errors) if pbs_errors else "PBS indisponível"
         for vm in vms:
-            vm.backup = backups.get(vm.vmid, BackupInfo(status="missing", detail="Nenhum snapshot localizado")).model_copy(deep=True)
+            default_backup = (
+                BackupInfo(status="unknown", detail=unavailable_detail)
+                if pbs_unavailable and vm.vmid not in backups
+                else BackupInfo(status="missing", detail="Nenhum snapshot localizado")
+            )
+            vm.backup = backups.get(vm.vmid, default_backup).model_copy(deep=True)
         payload = DashboardPayload(
             title=self.settings.dashboard_title,
             updated_at=now,
-            stale=any(not source.ok for source in pve_health) or not pbs_health.ok,
+            stale=any(not source.ok for source in pve_health) or any(not source.ok for source in pbs_health),
             vms=sorted(vms, key=lambda vm: (vm.pve_name.casefold(), vm.kind, vm.name.casefold(), vm.vmid)),
             pve=pve_health,
             pbs=pbs_health,
@@ -77,3 +96,13 @@ class DashboardService:
         if not self._cached:
             return {}
         return {vm.vmid: vm.backup.model_copy(deep=True) for vm in self._cached.vms}
+
+
+def merge_backup_results(results: list[dict[int, BackupInfo]]) -> dict[int, BackupInfo]:
+    merged: dict[int, BackupInfo] = {}
+    for result in results:
+        for vmid, backup in result.items():
+            current = merged.get(vmid)
+            if current is None or (backup.last_backup is not None and (current.last_backup is None or backup.last_backup > current.last_backup)):
+                merged[vmid] = backup.model_copy(deep=True)
+    return merged

@@ -22,7 +22,6 @@ async def guest_action(
         raise HTTPException(status_code=404, detail="PVE não encontrado")
     try:
         upid = await client.operate_guest(node, kind, vmid, action, body)
-        await request.app.state.service.get_dashboard(force=True)
         return GuestActionResponse(action=action, upid=upid)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

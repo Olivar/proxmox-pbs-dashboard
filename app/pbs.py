@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import httpx
 
-from app.config import Settings
+from app.config import PbsInstance, Settings
 from app.models import BackupInfo
 from app.utils import pick, utc_from_epoch
 
@@ -26,14 +26,15 @@ class TaskAttempt:
 
 
 class PbsClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, instance: PbsInstance | None = None) -> None:
         self.settings = settings
+        self.instance = instance or settings.load_pbs_instances()[0]
         self.client = httpx.AsyncClient(
-            base_url=settings.pbs_base_url,
+            base_url=self.instance.base_url,
             timeout=settings.request_timeout_seconds,
-            verify=settings.pbs_verify_tls,
+            verify=self.instance.verify_tls,
             headers={
-                "Authorization": f"PBSAPIToken {settings.pbs_token_id}:{settings.pbs_token_secret}",
+                "Authorization": f"PBSAPIToken {self.instance.token_id}:{self.instance.token_secret}",
                 "Accept": "application/json",
             },
         )
@@ -45,7 +46,7 @@ class PbsClient:
         snapshots: dict[int, BackupInfo] = {}
         errors: list[str] = []
 
-        for datastore in self.settings.datastore_names:
+        for datastore in self.instance.datastore_names:
             for backup_type in ("vm", "ct"):
                 try:
                     rows = await self._get_json(
@@ -65,10 +66,10 @@ class PbsClient:
 
         try:
             tasks = await self._get_json(
-                f"/api2/json/nodes/{quote(self.settings.pbs_node, safe='')}/tasks",
+                f"/api2/json/nodes/{quote(self.instance.node, safe='')}/tasks",
                 params={"limit": self.settings.pbs_task_limit},
             )
-            attempts = parse_backup_tasks(tasks, set(self.settings.datastore_names))
+            attempts = parse_backup_tasks(tasks, set(self.instance.datastore_names))
             merge_task_attempts(snapshots, attempts)
         except PbsError:
             pass

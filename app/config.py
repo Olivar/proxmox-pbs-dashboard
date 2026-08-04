@@ -30,6 +30,33 @@ class PveInstance(BaseModel):
         return str(self.url).rstrip("/")
 
 
+class PbsInstance(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
+    url: HttpUrl
+    token_id: str = Field(min_length=1)
+    token_secret: str = Field(min_length=1)
+    datastores: str = Field(min_length=1)
+    node: str = Field(default="localhost", min_length=1, max_length=128)
+    verify_tls: bool = True
+
+    @field_validator("id", "name", "token_id", "token_secret", "datastores", "node")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("value cannot be empty")
+        return value
+
+    @property
+    def base_url(self) -> str:
+        return str(self.url).rstrip("/")
+
+    @property
+    def datastore_names(self) -> list[str]:
+        return [item.strip() for item in self.datastores.split(",") if item.strip()]
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore")
 
@@ -47,6 +74,7 @@ class Settings(BaseSettings):
 
     # Configuração principal. Mantém todos os PVEs no mesmo dashboard.env.
     pve_instances_json: str = ""
+    pbs_instances_json: str = ""
 
     # Compatibilidade temporária para migração de instalações anteriores.
     pve_instances_file: Path = Path("/etc/proxmox-pbs-dashboard/pve-instances.json")
@@ -55,10 +83,10 @@ class Settings(BaseSettings):
     pve_token_secret: str | None = None
     pve_verify_tls: bool = True
 
-    pbs_url: HttpUrl
-    pbs_token_id: str
-    pbs_token_secret: str
-    pbs_datastores: str
+    pbs_url: HttpUrl | None = None
+    pbs_token_id: str | None = None
+    pbs_token_secret: str | None = None
+    pbs_datastores: str = ""
     pbs_node: str = "localhost"
     pbs_verify_tls: bool = True
     pbs_task_limit: int = Field(default=500, ge=50, le=5000)
@@ -83,21 +111,39 @@ class Settings(BaseSettings):
         value = value.strip()
         return value or None
 
-    @field_validator("pbs_token_id", "pbs_token_secret", "pbs_datastores")
+    @field_validator("pbs_token_id", "pbs_token_secret")
     @classmethod
-    def non_empty_secret(cls, value: str) -> str:
+    def strip_optional_pbs_secret(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         value = value.strip()
-        if not value:
-            raise ValueError("value cannot be empty")
-        return value
+        return value or None
 
     @property
     def pbs_base_url(self) -> str:
+        if self.pbs_url is None:
+            raise ValueError("Nenhuma instÃ¢ncia PBS configurada")
         return str(self.pbs_url).rstrip("/")
 
     @property
     def datastore_names(self) -> list[str]:
         return [item.strip() for item in self.pbs_datastores.split(",") if item.strip()]
+
+    def load_pbs_instances(self) -> list[PbsInstance]:
+        if self.pbs_instances_json.strip():
+            return parse_pbs_instances(self.pbs_instances_json, "PBS_INSTANCES_JSON")
+        if self.pbs_url and self.pbs_token_id and self.pbs_token_secret and self.pbs_datastores.strip():
+            return [PbsInstance(
+                id="pbs",
+                name="PBS",
+                url=self.pbs_url,
+                token_id=self.pbs_token_id,
+                token_secret=self.pbs_token_secret,
+                datastores=self.pbs_datastores,
+                node=self.pbs_node,
+                verify_tls=self.pbs_verify_tls,
+            )]
+        raise ValueError("Nenhuma instÃ¢ncia PBS configurada. Defina PBS_INSTANCES_JSON no dashboard.env.")
 
     @property
     def excluded_interfaces(self) -> tuple[str, ...]:
@@ -114,6 +160,31 @@ class Settings(BaseSettings):
 
     def load_ip_overrides(self) -> dict[int, str]:
         return _read_ip_map(self.ip_overrides_file)
+
+
+def parse_pbs_instances(raw: str, source: str = "PBS_INSTANCES_JSON") -> list[PbsInstance]:
+    try:
+        payload: Any = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{source} contÃ©m JSON invÃ¡lido: {exc}") from exc
+    return validate_pbs_instances(payload, source)
+
+
+def validate_pbs_instances(payload: Any, source: str = "PBS_INSTANCES_JSON") -> list[PbsInstance]:
+    if not isinstance(payload, list) or not payload:
+        raise ValueError(f"{source} deve conter uma lista JSON nÃ£o vazia")
+    instances: list[PbsInstance] = []
+    seen_ids: set[str] = set()
+    for index, item in enumerate(payload, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"InstÃ¢ncia PBS #{index} invÃ¡lida: esperado objeto JSON")
+        instance = PbsInstance.model_validate(item)
+        normalized_id = instance.id.casefold()
+        if normalized_id in seen_ids:
+            raise ValueError(f"ID de instÃ¢ncia PBS duplicado: {instance.id}")
+        seen_ids.add(normalized_id)
+        instances.append(instance)
+    return instances
 
 
 def parse_pve_instances(raw: str, source: str = "PVE_INSTANCES_JSON") -> list[PveInstance]:
