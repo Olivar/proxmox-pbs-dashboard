@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Proxmox PBS Dashboard updates
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/proxmox-pbs-dashboard/scripts/check-update.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
