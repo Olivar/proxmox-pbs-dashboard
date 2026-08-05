@@ -11,9 +11,12 @@ APP_DIR=/opt/proxmox-pbs-dashboard
 CONFIG_DIR=/etc/proxmox-pbs-dashboard
 STATE_DIR=/var/lib/proxmox-pbs-dashboard
 SERVICE_USER=proxmox-dashboard
+APP_SERVICE=/etc/systemd/system/proxmox-pbs-dashboard.service
+UPDATE_SERVICE=/etc/systemd/system/proxmox-pbs-dashboard-update.service
+UPDATE_TIMER=/etc/systemd/system/proxmox-pbs-dashboard-update.timer
 
 apt-get update
-apt-get install -y python3 python3-venv python3-pip ca-certificates git rsync openssl
+apt-get install -y python3 python3-venv python3-pip ca-certificates git rsync openssl util-linux
 
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   useradd --system --home-dir "$STATE_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
@@ -26,6 +29,8 @@ install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$STATE_DIR"
 if [[ "$SOURCE_DIR" != "$APP_DIR" ]]; then
   rsync -a --delete --exclude '.venv/' --exclude '.env' "$SOURCE_DIR/" "$APP_DIR/"
 fi
+
+chmod 0755 "$APP_DIR/scripts/update.sh" "$APP_DIR/scripts/check-update.sh"
 
 python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/pip" install --upgrade pip
@@ -53,12 +58,17 @@ if [[ ! -f "$STATE_DIR/notes.json" ]]; then printf '{}\n' > "$STATE_DIR/notes.js
 chown "$SERVICE_USER":"$SERVICE_USER" "$STATE_DIR/notes.json"
 chmod 0640 "$STATE_DIR/notes.json"
 
-install -m 0644 "$APP_DIR/deploy/proxmox-pbs-dashboard.service" /etc/systemd/system/proxmox-pbs-dashboard.service
+install -m 0644 "$APP_DIR/deploy/proxmox-pbs-dashboard.service" "$APP_SERVICE"
+install -m 0644 "$APP_DIR/deploy/proxmox-pbs-dashboard-update.service" "$UPDATE_SERVICE"
+install -m 0644 "$APP_DIR/deploy/proxmox-pbs-dashboard-update.timer" "$UPDATE_TIMER"
+
 systemctl daemon-reload
 systemctl enable proxmox-pbs-dashboard.service
+systemctl enable --now proxmox-pbs-dashboard-update.timer
 
 printf '\nPróximos passos:\n'
 printf '1. Revise %s/dashboard.env\n' "$CONFIG_DIR"
 printf '2. Ajuste PBS e PVEs pela página Configurações\n'
 printf '3. Execute: systemctl restart proxmox-pbs-dashboard\n'
 printf '4. Acesse: http://IP-DO-CONTAINER:8080\n'
+printf '5. Atualizações da main serão verificadas automaticamente a cada 5 minutos.\n'

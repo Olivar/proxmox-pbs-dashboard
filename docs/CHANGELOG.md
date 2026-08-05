@@ -20,6 +20,14 @@ Este arquivo registra as funcionalidades, correções e decisões relevantes do 
 
 - Após a autenticação, o formulário grande é ocultado e os atalhos ficam disponíveis no cabeçalho do modal.
 
+### Atualização automática
+
+- Adicionado um timer systemd que consulta `origin/main` a cada 5 minutos.
+- O servidor executa `scripts/update.sh` somente quando existe um commit novo em avanço direto.
+- A atualização automática é ignorada quando o repositório está fora da branch `main`, contém alterações locais ou divergiu do remoto.
+- Removido o workflow de deploy por SSH e sua necessidade de secrets, chave SSH e porta pública.
+- Os scripts de instalação e atualização passam a instalar e ativar o timer automaticamente.
+
 ## [0.2.2] — 2026-08-05
 
 ### Console noVNC
