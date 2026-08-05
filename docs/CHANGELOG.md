@@ -2,6 +2,12 @@
 
 Este arquivo registra as funcionalidades, correções e decisões relevantes do dashboard. Toda implementação nova deve incluir uma entrada aqui, com a versão, data e uma descrição objetiva do que mudou.
 
+## [0.2.1] — 2026-08-05
+
+### Correção do console
+
+- O ticket VNC temporário retornado pelo `vncproxy` agora é fornecido ao noVNC como credencial do protocolo, corrigindo a solicitação adicional de senha após a autenticação no PVE.
+
 ## [0.2.0] — 2026-08-05
 
 ### Interface

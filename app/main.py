@@ -235,7 +235,11 @@ async def create_console(body: ConsoleRequest, request: Request) -> dict[str, st
             verify_tls=proxy.verify_tls,
         ),
     )
-    return {"session_id": session_id, "websocket_path": f"/api/console/{session_id}/websocket"}
+    return {
+        "session_id": session_id,
+        "websocket_path": f"/api/console/{session_id}/websocket",
+        "vnc_password": proxy.vnc_ticket,
+    }
 
 
 @app.websocket("/api/console/{session_id}/websocket")

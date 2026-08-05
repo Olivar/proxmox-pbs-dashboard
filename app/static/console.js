@@ -68,7 +68,8 @@ async function connectConsole(event) {
     setStatus("Conectando ao console…");
     const websocketUrl = new URL(payload.websocket_path, window.location.href);
     websocketUrl.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    rfb = new RFB(screen, websocketUrl.toString());
+    const vncPassword = payload.vnc_password;
+    rfb = new RFB(screen, websocketUrl.toString(), {credentials: {password: vncPassword}});
     rfb.scaleViewport = true;
     rfb.resizeSession = true;
     rfb.clipViewport = false;
@@ -76,7 +77,10 @@ async function connectConsole(event) {
     rfb.addEventListener("disconnect", (event) => {
       if (dialog.open) setStatus(event.detail?.clean ? "Console desconectado" : "Console desconectado inesperadamente", !event.detail?.clean);
     });
-    rfb.addEventListener("credentialsrequired", () => setStatus("O PVE solicitou credenciais adicionais para o console", true));
+    rfb.addEventListener("credentialsrequired", () => {
+      rfb.sendCredentials({password: vncPassword});
+      setStatus("Autenticando o console…");
+    });
   } catch (error) {
     authSubmit.disabled = false;
     setStatus(error.message, true);
