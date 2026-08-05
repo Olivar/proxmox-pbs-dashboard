@@ -10,11 +10,14 @@ APP_DIR=/opt/proxmox-pbs-dashboard
 CONFIG_DIR=/etc/proxmox-pbs-dashboard
 ENV_FILE="$CONFIG_DIR/dashboard.env"
 LEGACY_PVE_FILE="$CONFIG_DIR/pve-instances.json"
-SERVICE_FILE=/etc/systemd/system/proxmox-pbs-dashboard.service
+APP_SERVICE=/etc/systemd/system/proxmox-pbs-dashboard.service
+UPDATE_SERVICE=/etc/systemd/system/proxmox-pbs-dashboard-update.service
+UPDATE_TIMER=/etc/systemd/system/proxmox-pbs-dashboard-update.timer
 SERVICE_USER=proxmox-dashboard
 
 cd "$APP_DIR"
 git pull --ff-only
+chmod 0755 "$APP_DIR/scripts/update.sh" "$APP_DIR/scripts/check-update.sh"
 .venv/bin/pip install -r requirements.txt
 
 install -d -o root -g "$SERVICE_USER" -m 0770 "$CONFIG_DIR"
@@ -49,8 +52,12 @@ PY
   chmod 0660 "$ENV_FILE"
 fi
 
-install -m 0644 "$APP_DIR/deploy/proxmox-pbs-dashboard.service" "$SERVICE_FILE"
+install -m 0644 "$APP_DIR/deploy/proxmox-pbs-dashboard.service" "$APP_SERVICE"
+install -m 0644 "$APP_DIR/deploy/proxmox-pbs-dashboard-update.service" "$UPDATE_SERVICE"
+install -m 0644 "$APP_DIR/deploy/proxmox-pbs-dashboard-update.timer" "$UPDATE_TIMER"
+
 systemctl daemon-reload
+systemctl enable --now proxmox-pbs-dashboard-update.timer
 systemctl restart proxmox-pbs-dashboard
 sleep 2
 systemctl --no-pager --full status proxmox-pbs-dashboard

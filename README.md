@@ -195,11 +195,38 @@ sudo journalctl -u proxmox-pbs-dashboard -f
 curl http://127.0.0.1:8080/health
 ```
 
-Atualização do código após `git pull`:
+Atualização manual:
 
 ```bash
 sudo bash /opt/proxmox-pbs-dashboard/scripts/update.sh
 ```
+
+### Atualização automática
+
+A instalação cria o timer `proxmox-pbs-dashboard-update.timer`. Ele consulta `origin/main` a cada 5 minutos e executa a atualização somente quando encontra um commit novo.
+
+Não é necessário abrir SSH para o GitHub, criar secrets ou configurar webhook. O servidor apenas usa a mesma autenticação Git que já permite executar `git pull` manualmente.
+
+Verificar o timer:
+
+```bash
+systemctl status proxmox-pbs-dashboard-update.timer --no-pager
+systemctl list-timers proxmox-pbs-dashboard-update.timer
+```
+
+Executar uma verificação imediata:
+
+```bash
+sudo systemctl start proxmox-pbs-dashboard-update.service
+```
+
+Ver logs:
+
+```bash
+sudo journalctl -u proxmox-pbs-dashboard-update.service -n 100 --no-pager -l
+```
+
+A atualização é ignorada quando a cópia local não está na branch `main`, possui alterações locais ou divergiu de `origin/main`.
 
 ## Nginx opcional
 
