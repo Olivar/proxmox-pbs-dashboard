@@ -26,10 +26,12 @@ function resetConsole() {
     rfb.disconnect();
     rfb = null;
   }
+  dialog.classList.remove("console-connected");
   screen.replaceChildren();
   authForm.hidden = false;
   authFields.hidden = false;
   authSubmit.disabled = false;
+  description.hidden = false;
   toolbar.hidden = true;
   setStatus("");
 }
@@ -69,6 +71,7 @@ async function connectConsole(event) {
     document.getElementById("console-password").value = "";
     document.getElementById("console-otp").value = "";
     authForm.hidden = true;
+    description.hidden = true;
     toolbar.hidden = false;
     setStatus("Conectando ao console…");
     const websocketUrl = new URL(payload.websocket_path, window.location.href);
@@ -78,7 +81,10 @@ async function connectConsole(event) {
     rfb.scaleViewport = true;
     rfb.resizeSession = true;
     rfb.clipViewport = false;
-    rfb.addEventListener("connect", () => setStatus("Console conectado"));
+    rfb.addEventListener("connect", () => {
+      dialog.classList.add("console-connected");
+      setStatus("");
+    });
     rfb.addEventListener("disconnect", (event) => {
       if (dialog.open) setStatus(event.detail?.clean ? "Console desconectado" : "Console desconectado inesperadamente", !event.detail?.clean);
     });

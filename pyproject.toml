@@ -1,6 +1,6 @@
 [project]
 name = "proxmox-pbs-dashboard"
-version = "0.2.2"
+version = "0.2.5"
 description = "Read-only web dashboard for Proxmox VE virtual machines and PBS backups"
 requires-python = ">=3.11"
 

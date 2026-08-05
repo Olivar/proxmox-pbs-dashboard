@@ -2,6 +2,24 @@
 
 Este arquivo registra as funcionalidades, correções e decisões relevantes do dashboard. Toda implementação nova deve incluir uma entrada aqui, com a versão, data e uma descrição objetiva do que mudou.
 
+## [0.2.5] — 2026-08-05
+
+### Console noVNC
+
+- Ajustada a área do console para ocupar apenas o espaço disponível da janela e evitar a barra de rolagem lateral/vertical após a conexão.
+
+## [0.2.4] — 2026-08-05
+
+### Console noVNC
+
+- Mantido o formulário inicial de autenticação e ocultado automaticamente após a conexão do console, deixando a tela noVNC e os atalhos em destaque.
+
+## [0.2.3] — 2026-08-05
+
+### Console noVNC
+
+- Após a autenticação, o formulário grande é ocultado e os atalhos ficam disponíveis no cabeçalho do modal.
+
 ## [0.2.2] — 2026-08-05
 
 ### Console noVNC

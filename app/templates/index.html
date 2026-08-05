@@ -118,7 +118,7 @@
 
   <dialog id="console-dialog" class="dialog console-dialog">
     <div class="dialog-form">
-      <header class="dialog-header"><div><span class="dialog-kicker">Console Proxmox</span><h2 id="console-title">Console noVNC</h2></div><button id="console-close" type="button" class="icon-button" aria-label="Fechar"><svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
+      <header class="dialog-header"><div><span class="dialog-kicker">Console Proxmox</span><h2 id="console-title">Console noVNC</h2></div><div id="console-toolbar" class="console-toolbar" hidden aria-label="Atalhos do console"><button id="console-ctrl-alt-del" type="button" class="secondary-button">Ctrl + Alt + Del</button><button id="console-focus" type="button" class="secondary-button">Focar teclado</button></div><button id="console-close" type="button" class="icon-button" aria-label="Fechar"><svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
       <div class="dialog-body console-body">
         <p id="console-description" class="muted"></p>
         <p id="console-status" class="muted" hidden></p>
@@ -126,11 +126,6 @@
           <div id="console-auth-fields" class="form-grid"><label>Usuário<input id="console-user" required autocomplete="username"></label><label>Realm<select id="console-realm"><option value="pam">pam</option><option value="pve">pve</option></select></label><label>Senha<input id="console-password" type="password" required autocomplete="current-password"></label><label>2FA opcional<input id="console-otp" autocomplete="one-time-code"></label></div>
           <button id="console-auth-submit" type="submit" class="primary-button">Conectar console</button>
         </form>
-        <div id="console-toolbar" class="console-toolbar" hidden>
-          <span class="muted">Atalhos:</span>
-          <button id="console-ctrl-alt-del" type="button" class="secondary-button">Ctrl + Alt + Del</button>
-          <button id="console-focus" type="button" class="secondary-button">Focar teclado</button>
-        </div>
         <div id="console-screen" class="console-screen"></div>
       </div>
     </div>
