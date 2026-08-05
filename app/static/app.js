@@ -45,14 +45,8 @@ const usageLine = (label, value, total) => {
   return `<span class="usage-line usage-${usageLevel(percent)}"><b>${label}</b><span class="usage-indicator" aria-hidden="true"><i style="width:${percent}%"></i></span><strong>${percent}%</strong><small>de ${escapeHtml(total)}</small></span>`;
 };
 const usage = (guest) => `<div class="usage-stack">${usageLine("CPU", guest.cpu_percent, formatCores(guest.cpu_total_cores))}${usageLine("RAM", guest.ram_percent, formatBytes(guest.ram_total_bytes))}</div>`;
-const consoleUrl = (guest) => {
-  const url = new URL(guest.pve_url);
-  url.pathname = "/";
-  url.search = new URLSearchParams({console: "kvm", novnc: "1", vmid: String(guest.vmid), node: guest.node, resize: "scale"}).toString();
-  return url.toString();
-};
 const consoleButton = (guest) => guest.kind === "qemu"
-  ? `<a class="row-icon console" href="${escapeHtml(consoleUrl(guest))}" target="_blank" rel="noopener noreferrer" title="Abrir console noVNC no Proxmox" aria-label="Abrir console noVNC no Proxmox">${ICONS.console}</a>`
+  ? `<button class="row-icon console" data-console="1" data-pve="${escapeHtml(guest.pve_id)}" data-node="${escapeHtml(guest.node)}" data-vmid="${guest.vmid}" data-name="${escapeHtml(guest.name)}" title="Abrir console noVNC" aria-label="Abrir console noVNC">${ICONS.console}</button>`
   : "";
 const formatResourceBytes = (bytes) => { const total = Number(bytes || 0); if (!total) return "0 B"; const gib = total / 1073741824; return `${new Intl.NumberFormat("pt-BR", {maximumFractionDigits: gib < 10 ? 1 : 0}).format(gib)} GB`; };
 const formatLoad = (value) => value == null ? "—" : new Intl.NumberFormat("pt-BR", {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(Number(value));

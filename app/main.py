@@ -3,24 +3,26 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from app.auth import COOKIE_NAME, create_session, read_session, require_csrf, verify_password
+from app.console import ConsoleProxy, ConsoleSessionStore, bridge_console
 from app.config import get_settings
 from app.ip_cache import IpCache
 from app.models import DashboardPayload, NoteUpdate, PveSummary
 from app.note_store import NoteStore
 from app.operations import router as operations_router
 from app.pbs import PbsClient
-from app.proxmox import ProxmoxClient
+from app.proxmox import ProxmoxClient, ProxmoxError
 from app.service import DashboardService
 from app.settings_store import masked_pbs_settings, masked_pve_settings, masked_settings, write_env
 from app.version import APP_VERSION
@@ -39,6 +41,17 @@ class SettingsUpdate(BaseModel):
     values: dict[str, str]
     pves: list[dict[str, Any]]
     pbses: list[dict[str, Any]]
+
+
+class ConsoleRequest(BaseModel):
+    pve_id: str = Field(min_length=1, max_length=64)
+    node: str = Field(min_length=1, max_length=128)
+    kind: Literal["qemu"] = "qemu"
+    vmid: int = Field(ge=100)
+    username: str = Field(min_length=1, max_length=128)
+    realm: str = Field(default="pam", min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=1024)
+    otp: str | None = Field(default=None, max_length=256)
 
 
 async def refresh_loop(service: DashboardService, interval: int) -> None:
@@ -68,6 +81,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.service = service
     app.state.notes = notes
     app.state.pve_clients = {client.instance.id: client for client in pve_clients}
+    app.state.console_sessions = ConsoleSessionStore()
     task = asyncio.create_task(refresh_loop(service, settings.refresh_seconds))
     try:
         yield
@@ -197,6 +211,44 @@ async def pve_summary(pve_id: str, request: Request) -> PveSummary:
         return await client.get_summary()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/console")
+async def create_console(body: ConsoleRequest, request: Request) -> dict[str, str]:
+    client = request.app.state.pve_clients.get(body.pve_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="PVE não encontrado")
+    try:
+        proxy = await client.create_vnc_proxy(body.node, body.kind, body.vmid, body)
+    except ProxmoxError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    session_id = secrets.token_urlsafe(24)
+    await request.app.state.console_sessions.put(
+        session_id,
+        ConsoleProxy(
+            pve_url=proxy.pve_url,
+            node=proxy.node,
+            vmid=proxy.vmid,
+            port=proxy.port,
+            vnc_ticket=proxy.vnc_ticket,
+            auth_ticket=proxy.auth_ticket,
+            verify_tls=proxy.verify_tls,
+        ),
+    )
+    return {"session_id": session_id, "websocket_path": f"/api/console/{session_id}/websocket"}
+
+
+@app.websocket("/api/console/{session_id}/websocket")
+async def console_websocket(websocket: WebSocket, session_id: str) -> None:
+    settings = websocket.app.state.settings
+    if read_session(websocket, settings.dashboard_session_secret) is None:  # type: ignore[arg-type]
+        await websocket.close(code=4401, reason="Sessão do dashboard inválida")
+        return
+    proxy = await websocket.app.state.console_sessions.take(session_id)
+    if proxy is None:
+        await websocket.close(code=4408, reason="Ticket de console expirado")
+        return
+    await bridge_console(websocket, proxy)
 
 
 @app.post("/api/refresh", response_model=DashboardPayload)

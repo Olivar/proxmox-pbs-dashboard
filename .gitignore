@@ -6,5 +6,6 @@ __pycache__/
 .coverage
 htmlcov/
 *.log
+.tmp-novnc/
 ip-cache.json
 config/ip-overrides.json

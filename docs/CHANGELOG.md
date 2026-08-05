@@ -2,11 +2,12 @@
 
 Este arquivo registra as funcionalidades, correções e decisões relevantes do dashboard. Toda implementação nova deve incluir uma entrada aqui, com a versão, data e uma descrição objetiva do que mudou.
 
-## [0.1.1] — 2026-08-05
+## [0.2.0] — 2026-08-05
 
 ### Interface
 
-- Adicionado ícone de tela na coluna **Ações** para abrir o console noVNC da VM no PVE correspondente, em nova aba e sem expor tokens do dashboard.
+- Adicionado ícone de tela na coluna **Ações** para abrir o console noVNC por meio do dashboard, com autenticação temporária no PVE e proxy WebSocket pelo servidor público.
+- Incluído o cliente noVNC localmente, sem dependência de acesso externo do navegador ao PVE.
 
 ## [0.1.0] — 2026-08-04
 

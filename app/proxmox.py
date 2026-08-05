@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -16,6 +18,17 @@ from app.utils import format_uptime, pick, state_display
 
 class ProxmoxError(RuntimeError):
     pass
+
+
+@dataclass(slots=True)
+class VncProxyInfo:
+    pve_url: str
+    node: str
+    vmid: int
+    port: int
+    vnc_ticket: str
+    auth_ticket: str
+    verify_tls: bool
 
 
 class ProxmoxClient:
@@ -218,6 +231,66 @@ class ProxmoxClient:
         if not isinstance(result, dict) or "data" not in result:
             raise ProxmoxError(f"Resposta inválida da API {self.instance.name}")
         return str(result["data"]) if result["data"] else None
+
+    async def create_vnc_proxy(
+        self, node: str, kind: str, vmid: int, credentials: GuestActionRequest
+    ) -> VncProxyInfo:
+        if kind != "qemu":
+            raise ProxmoxError("O console noVNC está disponível apenas para VMs QEMU")
+        username = credentials.username.strip()
+        realm = credentials.realm.strip()
+        if "@" not in username:
+            username = f"{username}@{realm}"
+        auth_data: dict[str, str] = {"username": username, "password": credentials.password}
+        if credentials.otp and credentials.otp.strip():
+            auth_data["otp"] = credentials.otp.strip()
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.instance.base_url,
+                timeout=self.settings.request_timeout_seconds,
+                verify=self.instance.verify_tls,
+                headers={"Accept": "application/json"},
+            ) as client:
+                auth = await client.post("/api2/json/access/ticket", data=auth_data)
+                auth.raise_for_status()
+                auth_payload = auth.json()
+                auth_result = auth_payload.get("data") if isinstance(auth_payload, dict) else None
+                if not isinstance(auth_result, dict) or not auth_result.get("ticket"):
+                    raise ProxmoxError("Autenticação recusada pelo PVE")
+                auth_ticket = str(auth_result["ticket"])
+                csrf = str(auth_result.get("CSRFPreventionToken") or "")
+                response = await client.post(
+                    f"/api2/json/nodes/{quote(node, safe='')}/qemu/{vmid}/vncproxy",
+                    headers={"CSRFPreventionToken": csrf},
+                    cookies={"PVEAuthCookie": auth_ticket},
+                    data={"websocket": 1},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                result = payload.get("data") if isinstance(payload, dict) else None
+                if not isinstance(result, dict) or not result.get("ticket") or not result.get("port"):
+                    raise ProxmoxError("O PVE não retornou um ticket de console válido")
+                return VncProxyInfo(
+                    pve_url=self.instance.base_url,
+                    node=node,
+                    vmid=vmid,
+                    port=int(result["port"]),
+                    vnc_ticket=str(result["ticket"]),
+                    auth_ticket=auth_ticket,
+                    verify_tls=self.instance.verify_tls,
+                )
+        except ProxmoxError:
+            raise
+        except (httpx.HTTPStatusError, httpx.RequestError, ValueError, TypeError) as exc:
+            detail = ""
+            if isinstance(exc, httpx.HTTPStatusError):
+                try:
+                    error_payload = exc.response.json()
+                    detail = str(error_payload.get("errors") or error_payload.get("data") or "")
+                except ValueError:
+                    detail = exc.response.text[:300]
+            suffix = f": {detail}" if detail else ""
+            raise ProxmoxError(f"Falha ao abrir console em {self.instance.name}{suffix}") from exc
 
     async def _get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
         try:

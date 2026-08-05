@@ -46,3 +46,4 @@ html[data-theme="dark"]{
 @media(max-width:760px){.pbs-grid{grid-template-columns:1fr!important}.pbs-grid .wide-field{grid-column:auto}}
 .dashboard-shell{width:100%;margin:0}
 .row-icon.console{color:var(--accent)}
+.console-dialog{width:min(1100px,calc(100% - 24px))}.console-body{min-height:420px}.console-auth-form{display:grid;gap:12px}.console-auth-form>button{justify-self:end}.console-screen{display:grid;min-height:0;margin-top:10px;background:#05070a;border-radius:6px;overflow:hidden}.console-screen canvas{width:100%!important;height:auto!important}.console-screen:empty{display:none}

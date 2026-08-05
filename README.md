@@ -187,7 +187,7 @@ O campo “Último backup” representa o último snapshot válido. Uma tentativ
 
 ### Console noVNC
 
-Nas VMs QEMU, o ícone de tela na coluna **Ações** abre o console noVNC oficial do PVE em uma nova aba, usando o nó e o VMID corretos. O navegador precisa conseguir acessar o PVE e ter uma sessão autenticada nele; o dashboard não envia tokens para a URL.
+Nas VMs QEMU, o ícone de tela na coluna **Ações** abre o console noVNC por meio do próprio dashboard. O usuário informa suas credenciais do PVE no modal, o backend cria um ticket temporário e intermedeia a conexão WebSocket; o navegador não precisa acessar o endereço do PVE e nenhuma senha ou token é armazenado.
 
 ```bash
 sudo systemctl restart proxmox-pbs-dashboard
