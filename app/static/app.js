@@ -15,6 +15,7 @@ const ICONS = {
   play: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg>',
   stop: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>',
   restart: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 5v6h-6"/></svg>',
+  console: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1"/><path d="M8 20h8M12 16v4"/></svg>',
   note: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v13H8l-4 3Z"/><path d="M8 8h8M8 12h6"/></svg>'
 };
 
@@ -44,6 +45,15 @@ const usageLine = (label, value, total) => {
   return `<span class="usage-line usage-${usageLevel(percent)}"><b>${label}</b><span class="usage-indicator" aria-hidden="true"><i style="width:${percent}%"></i></span><strong>${percent}%</strong><small>de ${escapeHtml(total)}</small></span>`;
 };
 const usage = (guest) => `<div class="usage-stack">${usageLine("CPU", guest.cpu_percent, formatCores(guest.cpu_total_cores))}${usageLine("RAM", guest.ram_percent, formatBytes(guest.ram_total_bytes))}</div>`;
+const consoleUrl = (guest) => {
+  const url = new URL(guest.pve_url);
+  url.pathname = "/";
+  url.search = new URLSearchParams({console: "kvm", novnc: "1", vmid: String(guest.vmid), node: guest.node, resize: "scale"}).toString();
+  return url.toString();
+};
+const consoleButton = (guest) => guest.kind === "qemu"
+  ? `<a class="row-icon console" href="${escapeHtml(consoleUrl(guest))}" target="_blank" rel="noopener noreferrer" title="Abrir console noVNC no Proxmox" aria-label="Abrir console noVNC no Proxmox">${ICONS.console}</a>`
+  : "";
 const formatResourceBytes = (bytes) => { const total = Number(bytes || 0); if (!total) return "0 B"; const gib = total / 1073741824; return `${new Intl.NumberFormat("pt-BR", {maximumFractionDigits: gib < 10 ? 1 : 0}).format(gib)} GB`; };
 const formatLoad = (value) => value == null ? "—" : new Intl.NumberFormat("pt-BR", {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(Number(value));
 const resourceMetric = (label, percent, detail) => { const normalized = normalizeUsage(percent); return `<article class="resource-metric"><header><strong>${label}</strong><b class="usage-${usageLevel(normalized)}">${normalized}%</b></header><div class="resource-bar"><i class="usage-${usageLevel(normalized)}" style="width:${normalized}%"></i></div><small>${detail}</small></article>`; };
@@ -54,8 +64,8 @@ const renderResourceSummary = (summary) => {
   elements.resourceBody.innerHTML = `<div class="resource-overview"><span class="muted">${escapeHtml(nodeLabel)}</span><span class="muted">Atualizado: ${formatDate(summary.updated_at)}</span></div><div class="resource-metrics">${resourceMetric("CPU", summary.cpu_percent, `${summary.cpu_total_cores} cores disponíveis`)}${resourceMetric("RAM", summary.ram_percent, `${formatResourceBytes(summary.ram_used_bytes)} de ${formatResourceBytes(summary.ram_total_bytes)}`)}${resourceMetric("Disco", summary.disk_percent, `${formatResourceBytes(summary.disk_used_bytes)} de ${formatResourceBytes(summary.disk_total_bytes)}`)}</div><section class="resource-nodes"><h3>Nós</h3>${nodes || '<p class="muted">Nenhum nó retornado.</p>'}</section>`;
 };
 const actionButtons = (guest) => guest.state === "stopped"
-  ? `<button class="row-icon play" data-power="start" data-pve="${escapeHtml(guest.pve_id)}" data-vmid="${guest.vmid}" title="Iniciar" aria-label="Iniciar">${ICONS.play}</button>`
-  : `<button class="row-icon stop" data-power="shutdown" data-pve="${escapeHtml(guest.pve_id)}" data-vmid="${guest.vmid}" title="Desligar" aria-label="Desligar">${ICONS.stop}</button><button class="row-icon restart" data-power="reboot" data-pve="${escapeHtml(guest.pve_id)}" data-vmid="${guest.vmid}" title="Reiniciar" aria-label="Reiniciar">${ICONS.restart}</button>`;
+  ? `<button class="row-icon play" data-power="start" data-pve="${escapeHtml(guest.pve_id)}" data-vmid="${guest.vmid}" title="Iniciar" aria-label="Iniciar">${ICONS.play}</button>${consoleButton(guest)}`
+  : `<button class="row-icon stop" data-power="shutdown" data-pve="${escapeHtml(guest.pve_id)}" data-vmid="${guest.vmid}" title="Desligar" aria-label="Desligar">${ICONS.stop}</button><button class="row-icon restart" data-power="reboot" data-pve="${escapeHtml(guest.pve_id)}" data-vmid="${guest.vmid}" title="Reiniciar" aria-label="Reiniciar">${ICONS.restart}</button>${consoleButton(guest)}`;
 const noteButton = (guest) => `<button class="row-icon note ${guest.note ? "has-note" : ""}" data-note="1" data-pve="${escapeHtml(guest.pve_id)}" data-vmid="${guest.vmid}" title="${escapeHtml(guest.note || "Adicionar nota")}" aria-label="${guest.note ? "Editar nota" : "Adicionar nota"}">${ICONS.note}</button>`;
 const backupStatus = (status) => { const labels = {success: "Sucesso", failed: "Erro", running: "Executando", missing: "Sem backup", unknown: "Desconhecido"}; return `<span class="backup-status backup-${escapeHtml(status)}">${escapeHtml(labels[status] || labels.unknown)}</span>`; };
 

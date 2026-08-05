@@ -185,6 +185,10 @@ O campo “Último backup” representa o último snapshot válido. Uma tentativ
 
 ## Operação
 
+### Console noVNC
+
+Nas VMs QEMU, o ícone de tela na coluna **Ações** abre o console noVNC oficial do PVE em uma nova aba, usando o nó e o VMID corretos. O navegador precisa conseguir acessar o PVE e ter uma sessão autenticada nele; o dashboard não envia tokens para a URL.
+
 ```bash
 sudo systemctl restart proxmox-pbs-dashboard
 sudo journalctl -u proxmox-pbs-dashboard -f

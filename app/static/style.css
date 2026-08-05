@@ -45,3 +45,4 @@ html[data-theme="dark"]{
 @media(max-width:1050px){.pbs-grid{grid-template-columns:1fr 1fr!important}.pbs-grid .wide-field{grid-column:1/-1}}
 @media(max-width:760px){.pbs-grid{grid-template-columns:1fr!important}.pbs-grid .wide-field{grid-column:auto}}
 .dashboard-shell{width:100%;margin:0}
+.row-icon.console{color:var(--accent)}
