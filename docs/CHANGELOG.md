@@ -2,6 +2,14 @@
 
 Este arquivo registra as funcionalidades, correções e decisões relevantes do dashboard. Toda implementação nova deve incluir uma entrada aqui, com a versão, data e uma descrição objetiva do que mudou.
 
+## [0.2.2] — 2026-08-05
+
+### Console noVNC
+
+- Adicionada uma barra de atalhos com **Ctrl + Alt + Del**, necessário para desbloquear a tela de login do Windows.
+- Adicionado o botão **Focar teclado** para direcionar a digitação para a tela da VM.
+- Os atalhos são enviados pelo noVNC ao console remoto.
+
 ## [0.2.1] — 2026-08-05
 
 ### Correção do console

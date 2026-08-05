@@ -286,9 +286,18 @@ class ProxmoxClient:
             if isinstance(exc, httpx.HTTPStatusError):
                 try:
                     error_payload = exc.response.json()
-                    detail = str(error_payload.get("errors") or error_payload.get("data") or "")
+                    detail_value = error_payload.get("errors") or error_payload.get("data")
+                    if isinstance(detail_value, dict):
+                        detail = "; ".join(f"{key}: {value}" for key, value in detail_value.items())
+                    elif detail_value:
+                        detail = str(detail_value)
                 except ValueError:
-                    detail = exc.response.text[:300]
+                    pass
+                if not detail:
+                    detail = exc.response.text[:300].strip()
+                detail = f"HTTP {exc.response.status_code}" + (f" - {detail}" if detail else "")
+            elif isinstance(exc, httpx.RequestError):
+                detail = str(exc)
             suffix = f": {detail}" if detail else ""
             raise ProxmoxError(f"Falha ao abrir console em {self.instance.name}{suffix}") from exc
 

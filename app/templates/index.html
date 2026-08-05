@@ -126,6 +126,11 @@
           <div id="console-auth-fields" class="form-grid"><label>Usuário<input id="console-user" required autocomplete="username"></label><label>Realm<select id="console-realm"><option value="pam">pam</option><option value="pve">pve</option></select></label><label>Senha<input id="console-password" type="password" required autocomplete="current-password"></label><label>2FA opcional<input id="console-otp" autocomplete="one-time-code"></label></div>
           <button id="console-auth-submit" type="submit" class="primary-button">Conectar console</button>
         </form>
+        <div id="console-toolbar" class="console-toolbar" hidden>
+          <span class="muted">Atalhos:</span>
+          <button id="console-ctrl-alt-del" type="button" class="secondary-button">Ctrl + Alt + Del</button>
+          <button id="console-focus" type="button" class="secondary-button">Focar teclado</button>
+        </div>
         <div id="console-screen" class="console-screen"></div>
       </div>
     </div>

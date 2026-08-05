@@ -8,6 +8,9 @@ const description = document.getElementById("console-description");
 const status = document.getElementById("console-status");
 const screen = document.getElementById("console-screen");
 const closeButton = document.getElementById("console-close");
+const toolbar = document.getElementById("console-toolbar");
+const ctrlAltDelButton = document.getElementById("console-ctrl-alt-del");
+const focusButton = document.getElementById("console-focus");
 const csrf = document.body.dataset.csrf;
 let currentGuest = null;
 let rfb = null;
@@ -27,6 +30,7 @@ function resetConsole() {
   authForm.hidden = false;
   authFields.hidden = false;
   authSubmit.disabled = false;
+  toolbar.hidden = true;
   setStatus("");
 }
 
@@ -65,6 +69,7 @@ async function connectConsole(event) {
     document.getElementById("console-password").value = "";
     document.getElementById("console-otp").value = "";
     authForm.hidden = true;
+    toolbar.hidden = false;
     setStatus("Conectando ao console…");
     const websocketUrl = new URL(payload.websocket_path, window.location.href);
     websocketUrl.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -93,4 +98,14 @@ document.addEventListener("click", (event) => {
 });
 authForm.addEventListener("submit", connectConsole);
 closeButton.addEventListener("click", () => dialog.close());
+ctrlAltDelButton.addEventListener("click", () => {
+  if (!rfb) return;
+  rfb.sendCtrlAltDel();
+  setStatus("Ctrl + Alt + Del enviado ao console");
+});
+focusButton.addEventListener("click", () => {
+  if (!rfb) return;
+  rfb.focus();
+  setStatus("Teclado direcionado para o console");
+});
 dialog.addEventListener("close", resetConsole);
