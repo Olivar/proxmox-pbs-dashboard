@@ -27,7 +27,7 @@ install -d -o root -g "$SERVICE_USER" -m 0770 "$CONFIG_DIR"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$STATE_DIR"
 
 if [[ "$SOURCE_DIR" != "$APP_DIR" ]]; then
-  rsync -a --delete --exclude '.venv/' --exclude '.env' "$SOURCE_DIR/" "$APP_DIR/"
+  rsync -a --delete --exclude '.venv/' --exclude '.env' --exclude '.local/' "$SOURCE_DIR/" "$APP_DIR/"
 fi
 
 chmod 0755 "$APP_DIR/scripts/update.sh" "$APP_DIR/scripts/check-update.sh"

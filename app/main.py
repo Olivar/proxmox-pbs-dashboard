@@ -18,7 +18,7 @@ from app.auth import COOKIE_NAME, create_session, read_session, require_csrf, ve
 from app.console import ConsoleProxy, ConsoleSessionStore, bridge_console
 from app.config import get_settings
 from app.ip_cache import IpCache
-from app.models import DashboardPayload, NoteUpdate, PveSummary
+from app.models import DashboardPayload, GuestActionResponse, GuestLiveMetrics, NoteUpdate, PbsSummary, PveSummary
 from app.note_store import NoteStore
 from app.operations import router as operations_router
 from app.pbs import PbsClient
@@ -54,6 +54,10 @@ class ConsoleRequest(BaseModel):
     otp: str | None = Field(default=None, max_length=256)
 
 
+class ConsoleActionRequest(BaseModel):
+    action: Literal["start", "shutdown", "reboot"]
+
+
 async def refresh_loop(service: DashboardService, interval: int) -> None:
     while True:
         try:
@@ -81,6 +85,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.service = service
     app.state.notes = notes
     app.state.pve_clients = {client.instance.id: client for client in pve_clients}
+    app.state.pbs_clients = {client.instance.id: client for client in pbs_clients}
     app.state.console_sessions = ConsoleSessionStore()
     task = asyncio.create_task(refresh_loop(service, settings.refresh_seconds))
     try:
@@ -213,6 +218,17 @@ async def pve_summary(pve_id: str, request: Request) -> PveSummary:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.get("/api/pbs/{pbs_id}/summary", response_model=PbsSummary)
+async def pbs_summary(pbs_id: str, request: Request) -> PbsSummary:
+    client = request.app.state.pbs_clients.get(pbs_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="PBS não encontrado")
+    try:
+        return await client.get_summary()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.post("/api/console")
 async def create_console(body: ConsoleRequest, request: Request) -> dict[str, str]:
     client = request.app.state.pve_clients.get(body.pve_id)
@@ -233,6 +249,8 @@ async def create_console(body: ConsoleRequest, request: Request) -> dict[str, st
             vnc_ticket=proxy.vnc_ticket,
             auth_ticket=proxy.auth_ticket,
             verify_tls=proxy.verify_tls,
+            pve_id=body.pve_id,
+            csrf_token=proxy.csrf_token,
         ),
     )
     return {
@@ -240,6 +258,44 @@ async def create_console(body: ConsoleRequest, request: Request) -> dict[str, st
         "websocket_path": f"/api/console/{session_id}/websocket",
         "vnc_password": proxy.vnc_ticket,
     }
+
+
+async def get_active_console_proxy(request: Request, session_id: str) -> ConsoleProxy:
+    proxy = await request.app.state.console_sessions.get_active(session_id)
+    if proxy is None:
+        raise HTTPException(status_code=404, detail="SessÃ£o do console expirada")
+    return proxy
+
+
+@app.get("/api/console/{session_id}/metrics", response_model=GuestLiveMetrics)
+async def console_metrics(session_id: str, request: Request) -> GuestLiveMetrics:
+    proxy = await get_active_console_proxy(request, session_id)
+    client = request.app.state.pve_clients.get(proxy.pve_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="PVE nÃ£o encontrado")
+    try:
+        return await client.get_guest_metrics(proxy.node, "qemu", proxy.vmid)
+    except ProxmoxError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/console/{session_id}/action", response_model=GuestActionResponse)
+async def console_action(session_id: str, body: ConsoleActionRequest, request: Request) -> GuestActionResponse:
+    proxy = await get_active_console_proxy(request, session_id)
+    client = request.app.state.pve_clients.get(proxy.pve_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="PVE nÃ£o encontrado")
+    try:
+        upid = await client.operate_guest_with_ticket(proxy.node, "qemu", proxy.vmid, body.action, proxy.auth_ticket, proxy.csrf_token)
+        return GuestActionResponse(action=body.action, upid=upid)
+    except ProxmoxError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/console/{session_id}/close")
+async def close_console(session_id: str, request: Request) -> dict[str, bool]:
+    await request.app.state.console_sessions.discard(session_id)
+    return {"ok": True}
 
 
 @app.websocket("/api/console/{session_id}/websocket")
@@ -252,6 +308,7 @@ async def console_websocket(websocket: WebSocket, session_id: str) -> None:
     if proxy is None:
         await websocket.close(code=4408, reason="Ticket de console expirado")
         return
+    await websocket.app.state.console_sessions.activate(session_id, proxy)
     await bridge_console(websocket, proxy)
 
 

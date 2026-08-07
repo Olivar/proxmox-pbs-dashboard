@@ -19,6 +19,8 @@ class ConsoleProxy:
     vnc_ticket: str
     auth_ticket: str
     verify_tls: bool
+    pve_id: str = ""
+    csrf_token: str = ""
 
     @property
     def websocket_url(self) -> str:
@@ -36,9 +38,11 @@ class ConsoleSession:
 
 
 class ConsoleSessionStore:
-    def __init__(self, ttl_seconds: int = 90) -> None:
+    def __init__(self, ttl_seconds: int = 90, active_ttl_seconds: int = 3600) -> None:
         self.ttl_seconds = ttl_seconds
+        self.active_ttl_seconds = active_ttl_seconds
         self._items: dict[str, ConsoleSession] = {}
+        self._active: dict[str, ConsoleSession] = {}
         self._lock = asyncio.Lock()
 
     async def put(self, session_id: str, proxy: ConsoleProxy) -> None:
@@ -51,6 +55,31 @@ class ConsoleSessionStore:
         if item is None or item.expires_at < time.monotonic():
             return None
         return item.proxy
+
+    async def activate(self, session_id: str, proxy: ConsoleProxy) -> None:
+        async with self._lock:
+            self._active[session_id] = ConsoleSession(proxy=proxy, expires_at=time.monotonic() + self.active_ttl_seconds)
+
+    async def get_active(self, session_id: str) -> ConsoleProxy | None:
+        async with self._lock:
+            item = self._active.get(session_id)
+            if item is not None:
+                if item.expires_at < time.monotonic():
+                    self._active.pop(session_id, None)
+                    return None
+                item.expires_at = time.monotonic() + self.active_ttl_seconds
+                return item.proxy
+
+            item = self._items.get(session_id)
+            if item is None or item.expires_at < time.monotonic():
+                self._items.pop(session_id, None)
+                return None
+            return item.proxy
+
+    async def discard(self, session_id: str) -> None:
+        async with self._lock:
+            self._items.pop(session_id, None)
+            self._active.pop(session_id, None)
 
 
 async def bridge_console(websocket: WebSocket, proxy: ConsoleProxy) -> None:

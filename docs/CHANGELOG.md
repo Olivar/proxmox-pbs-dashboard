@@ -2,6 +2,84 @@
 
 Este arquivo registra as funcionalidades, correções e decisões relevantes do dashboard. Toda implementação nova deve incluir uma entrada aqui, com a versão, data e uma descrição objetiva do que mudou.
 
+## [0.2.16] — 2026-08-07
+
+### Resumo do PBS
+
+- PBS passou a ser uma fonte clicável com o mesmo tamanho visual dos PVEs.
+- Adicionado resumo com CPU, RAM, disco, datastores e histórico de jobs.
+- Alertas e marcação de jobs com erro como lidos seguem o mesmo padrão dos PVEs.
+
+## [0.2.15] — 2026-08-07
+
+### Alertas do histórico
+
+- Adicionado indicador vermelho nos PVEs com erros de tarefas não lidos.
+- O histórico permite marcar os erros como lidos; essa leitura fica salva no navegador e não reaparece nas atualizações seguintes.
+
+## [0.2.14] — 2026-08-07
+
+### Tabela principal
+
+- Condensado o espaçamento vertical entre as máquinas, mantendo CPU, RAM e Disco legíveis.
+
+## [0.2.13] — 2026-08-07
+
+### Histórico de tarefas
+
+- Melhoradas as descrições no padrão do Proxmox, como `VM 108 - Start`, `VM/CT 703 - Console` e `Backup Job`.
+- O histórico passa a ficar recolhido por padrão e pode ser expandido quando necessário.
+
+## [0.2.12] — 2026-08-07
+
+### Resumo do PVE
+
+- Adicionado o histórico das tarefas recentes de cada nó abaixo dos indicadores de recursos.
+- O histórico exibe data, nó, tipo/ID e status e permanece tolerante à ausência de permissão ou indisponibilidade do nó.
+
+## [0.2.11] — 2026-08-07
+
+### Monitoramento
+
+- Adicionada a métrica **Disco** à coluna **Uso** do console principal.
+- O percentual usa os dados do QEMU Guest Agent quando disponíveis e permanece indisponível quando o PVE não fornece uso real do filesystem.
+
+## [0.2.10] — 2026-08-07
+
+### Console noVNC
+
+- Quando o QEMU Guest Agent não está configurado, o uso de disco passa a ser exibido como indisponível, evitando apresentar `0%` incorretamente.
+
+## [0.2.9] — 2026-08-07
+
+### Console noVNC
+
+- O uso de disco passou a ser calculado pelo QEMU Guest Agent (`get-fsinfo`), somando o espaço usado e total dos sistemas de arquivos da VM.
+- Quando o agente não fornece dados de filesystem, o painel exibe indisponibilidade em vez de apresentar `0%` como se fosse um valor real.
+
+## [0.2.8] — 2026-08-07
+
+### Console noVNC
+
+- Fixadas as larguras do cabeçalho para evitar movimentação do console quando os textos mudam.
+- Adicionado fallback para calcular o uso de disco da VM a partir dos recursos do PVE quando `status/current` retorna zero.
+
+## [0.2.7] — 2026-08-07
+
+### Console noVNC
+
+- Corrigida a falsa mensagem de sessão expirada durante a primeira atualização das métricas.
+- Falhas transitórias de métricas não alteram mais o tamanho do cabeçalho.
+- Desabilitada a renegociação automática da resolução remota para evitar redimensionamento da tela noVNC.
+
+## [0.2.6] — 2026-08-06
+
+### Console noVNC
+
+- Adicionados os controles **Reboot**, **Stop** e **Start** no cabeçalho do console após a autenticação.
+- Adicionado painel online com percentuais de CPU, RAM, disco e rede da VM, atualizado automaticamente.
+- As operações reutilizam o ticket temporário da sessão autenticada e não pedem a senha novamente.
+
 ## [0.2.5] — 2026-08-05
 
 ### Console noVNC

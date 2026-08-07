@@ -31,3 +31,13 @@ async def test_console_session_is_single_use() -> None:
 
     assert await store.take("session") == proxy
     assert await store.take("session") is None
+
+
+@pytest.mark.asyncio
+async def test_console_session_is_available_before_websocket_activation() -> None:
+    store = ConsoleSessionStore(ttl_seconds=90)
+    proxy = ConsoleProxy("https://pve.test:8006", "pve01", 100, 5900, "vnc", "auth", False)
+
+    await store.put("session", proxy)
+
+    assert await store.get_active("session") == proxy

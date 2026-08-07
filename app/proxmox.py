@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import re
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
@@ -11,7 +12,7 @@ import httpx
 
 from app.config import PveInstance, Settings
 from app.ip_cache import IpCache
-from app.models import GuestActionRequest, PveNodeSummary, PveSummary, VmInfo
+from app.models import GuestActionRequest, GuestLiveMetrics, PveNodeSummary, PveSummary, PveTaskSummary, VmInfo
 from app.note_store import NoteStore
 from app.utils import format_uptime, pick, state_display
 
@@ -28,6 +29,7 @@ class VncProxyInfo:
     port: int
     vnc_ticket: str
     auth_ticket: str
+    csrf_token: str
     verify_tls: bool
 
 
@@ -59,6 +61,7 @@ class ProxmoxClient:
         overrides = self.settings.load_ip_overrides()
         guests: list[VmInfo] = []
         pending_ip: list[tuple[VmInfo, asyncio.Task[str | None]]] = []
+        pending_disk: list[tuple[VmInfo, asyncio.Task[tuple[int, int]]]] = []
 
         for item in data:
             if not isinstance(item, dict):
@@ -90,6 +93,9 @@ class ProxmoxClient:
                 cpu_total_cores=non_negative_float(pick(item, "maxcpu", "cpus", "cores", default=0)),
                 ram_percent=ratio_percent(item.get("mem"), item.get("maxmem")),
                 ram_total_bytes=non_negative_int(item.get("maxmem")),
+                disk_percent=ratio_percent(item.get("disk"), item.get("maxdisk")) if item.get("disk") and item.get("maxdisk") else None,
+                disk_used_bytes=non_negative_int(item.get("disk")),
+                disk_total_bytes=non_negative_int(item.get("maxdisk")),
                 uptime_seconds=max(0, uptime),
                 uptime_display=format_uptime(uptime),
                 state=state,
@@ -100,6 +106,8 @@ class ProxmoxClient:
             if state == "running" and node:
                 resolver = self._get_qemu_ip(node, vmid) if kind == "qemu" else self._get_lxc_ip(node, vmid)
                 pending_ip.append((guest, asyncio.create_task(resolver)))
+                if kind == "qemu":
+                    pending_disk.append((guest, asyncio.create_task(self._get_qemu_disk_usage(node, vmid))))
 
         for guest, task in pending_ip:
             try:
@@ -109,6 +117,16 @@ class ProxmoxClient:
             if resolved_ip:
                 guest.ip = resolved_ip
                 self.ip_cache.set(guest.vmid, resolved_ip)
+
+        for guest, task in pending_disk:
+            try:
+                disk_used, disk_total = await task
+            except Exception:
+                disk_used, disk_total = 0, 0
+            if disk_total:
+                guest.disk_used_bytes = disk_used
+                guest.disk_total_bytes = disk_total
+                guest.disk_percent = ratio_percent(disk_used, disk_total)
 
         return sorted(guests, key=lambda guest: (guest.name.casefold(), guest.vmid))
 
@@ -129,6 +147,10 @@ class ProxmoxClient:
         ram_used = sum(node.ram_used_bytes for node in measured_nodes)
         disk_total = sum(node.disk_total_bytes for node in measured_nodes)
         disk_used = sum(node.disk_used_bytes for node in measured_nodes)
+        task_nodes = [node.node for node in active_nodes] or [node.node for node in nodes]
+        task_groups = await asyncio.gather(*(self._get_node_tasks(node) for node in task_nodes))
+        tasks = [task for group in task_groups for task in group]
+        tasks.sort(key=lambda task: task.start_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
         return PveSummary(
             pve_id=self.instance.id,
@@ -146,6 +168,82 @@ class ProxmoxClient:
             disk_used_bytes=disk_used,
             disk_total_bytes=disk_total,
             nodes=nodes,
+            tasks=tasks[:50],
+        )
+
+    async def _get_node_tasks(self, node: str) -> list[PveTaskSummary]:
+        try:
+            data = await self._get_json(
+                f"/api2/json/nodes/{quote(node, safe='')}/tasks",
+                params={"limit": 50, "source": "all"},
+            )
+        except ProxmoxError:
+            return []
+        if not isinstance(data, list):
+            return []
+        result: list[PveTaskSummary] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            task_type = str(item.get("type") or "unknown")
+            task_id = str(item["id"]) if item.get("id") is not None else None
+            result.append(PveTaskSummary(
+                node=node,
+                task_type=task_type,
+                task_id=task_id,
+                description=describe_task(task_type, task_id),
+                status=str(item.get("status") or item.get("exitstatus") or "unknown"),
+                start_at=task_datetime(item.get("starttime")),
+                end_at=task_datetime(item.get("endtime")),
+                upid=str(item["upid"]) if item.get("upid") is not None else None,
+            ))
+        return result
+
+    async def get_guest_metrics(self, node: str, kind: str, vmid: int) -> GuestLiveMetrics:
+        if kind not in {"qemu", "lxc"}:
+            raise ProxmoxError("Tipo de guest invÃ¡lido")
+        status, config, resources, fsinfo = await asyncio.gather(
+            self._get_json(f"/api2/json/nodes/{quote(node, safe='')}/{kind}/{vmid}/status/current"),
+            self._get_optional_json(f"/api2/json/nodes/{quote(node, safe='')}/{kind}/{vmid}/config"),
+            self._get_optional_json("/api2/json/cluster/resources", {"type": "vm"}),
+            self._get_optional_json(f"/api2/json/nodes/{quote(node, safe='')}/{kind}/{vmid}/agent/get-fsinfo"),
+        )
+        guest_disk_used, guest_disk_total = parse_guest_disk_usage(fsinfo)
+        if not isinstance(status, dict):
+            raise ProxmoxError(f"{self.instance.name}: status da VM invÃ¡lido")
+        config = config if isinstance(config, dict) else {}
+        resources = resources if isinstance(resources, list) else []
+        resource = next(
+            (
+                item for item in resources
+                if isinstance(item, dict)
+                and str(item.get("node") or "") == node
+                and str(item.get("type") or "").lower() == kind
+                and str(item.get("vmid") or "") == str(vmid)
+            ),
+            {},
+        )
+        if guest_disk_total:
+            disk_used = guest_disk_used
+            disk_total = guest_disk_total
+        else:
+            disk_used = max(non_negative_int(status.get("disk")), non_negative_int(resource.get("disk")))
+            disk_total = non_negative_int(status.get("maxdisk")) or non_negative_int(resource.get("maxdisk"))
+        return GuestLiveMetrics(
+            pve_id=self.instance.id,
+            node=node,
+            vmid=vmid,
+            updated_at=datetime.now(timezone.utc),
+            cpu_percent=ratio_percent(status.get("cpu"), 1) if status.get("cpu") is not None else None,
+            ram_percent=ratio_percent(status.get("mem"), status.get("maxmem")) if status.get("maxmem") else None,
+            ram_used_bytes=non_negative_int(status.get("mem")),
+            ram_total_bytes=non_negative_int(status.get("maxmem")),
+            disk_percent=ratio_percent(disk_used, disk_total) if guest_disk_total or disk_used else None,
+            disk_used_bytes=disk_used,
+            disk_total_bytes=disk_total,
+            network_limit_bps=parse_network_limit_bps(config),
+            network_in_bytes=non_negative_int(status.get("netin")),
+            network_out_bytes=non_negative_int(status.get("netout")),
         )
 
     def _parse_node_summary(self, item: dict[str, Any]) -> PveNodeSummary:
@@ -181,6 +279,14 @@ class ProxmoxClient:
             except ProxmoxError:
                 return None
         return select_guest_ip(data, self.settings.excluded_interfaces)
+
+    async def _get_qemu_disk_usage(self, node: str, vmid: int) -> tuple[int, int]:
+        async with self._agent_semaphore:
+            try:
+                data = await self._get_json(f"/api2/json/nodes/{quote(node, safe='')}/qemu/{vmid}/agent/get-fsinfo")
+            except ProxmoxError:
+                return 0, 0
+        return parse_guest_disk_usage(data)
 
     async def operate_guest(
         self, node: str, kind: str, vmid: int, action: str, credentials: GuestActionRequest
@@ -232,6 +338,30 @@ class ProxmoxClient:
             raise ProxmoxError(f"Resposta inválida da API {self.instance.name}")
         return str(result["data"]) if result["data"] else None
 
+    async def operate_guest_with_ticket(self, node: str, kind: str, vmid: int, action: str, auth_ticket: str, csrf_token: str) -> str | None:
+        if kind not in {"qemu", "lxc"} or action not in {"start", "shutdown", "reboot"}:
+            raise ProxmoxError("OperaÃ§Ã£o de guest invÃ¡lida")
+        try:
+            response = await self.client.post(
+                f"/api2/json/nodes/{quote(node, safe='')}/{kind}/{vmid}/status/{action}",
+                headers={"CSRFPreventionToken": csrf_token, "Cookie": f"PVEAuthCookie={auth_ticket}"},
+            )
+            response.raise_for_status()
+            result = response.json()
+        except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as exc:
+            detail = ""
+            if isinstance(exc, httpx.HTTPStatusError):
+                try:
+                    error_payload = exc.response.json()
+                    detail = str(error_payload.get("errors") or error_payload.get("data") or "")
+                except ValueError:
+                    detail = exc.response.text[:300]
+            suffix = f": {detail}" if detail else ""
+            raise ProxmoxError(f"Falha na operaÃ§Ã£o em {self.instance.name}{suffix}") from exc
+        if not isinstance(result, dict) or "data" not in result:
+            raise ProxmoxError(f"Resposta invÃ¡lida da API {self.instance.name}")
+        return str(result["data"]) if result["data"] else None
+
     async def create_vnc_proxy(
         self, node: str, kind: str, vmid: int, credentials: GuestActionRequest
     ) -> VncProxyInfo:
@@ -277,6 +407,7 @@ class ProxmoxClient:
                     port=int(result["port"]),
                     vnc_ticket=str(result["ticket"]),
                     auth_ticket=auth_ticket,
+                    csrf_token=csrf,
                     verify_tls=self.instance.verify_tls,
                 )
         except ProxmoxError:
@@ -311,6 +442,12 @@ class ProxmoxClient:
         if not isinstance(payload, dict) or "data" not in payload:
             raise ProxmoxError(f"Resposta inválida da API {self.instance.name}")
         return payload["data"]
+
+    async def _get_optional_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        try:
+            return await self._get_json(path, params=params)
+        except ProxmoxError:
+            return {}
 
 
 def select_guest_ip(data: Any, excluded_prefixes: tuple[str, ...]) -> str | None:
@@ -354,6 +491,36 @@ def select_guest_ip(data: Any, excluded_prefixes: tuple[str, ...]) -> str | None
     return candidates[0][1]
 
 
+def parse_network_limit_bps(config: dict[str, Any]) -> int | None:
+    total_mbps = 0.0
+    for key, value in config.items():
+        if not str(key).lower().startswith("net") or not isinstance(value, str):
+            continue
+        match = re.search(r"(?:^|,)rate=(\d+(?:\.\d+)?)", value)
+        if match:
+            total_mbps += float(match.group(1))
+    return round(total_mbps * 1_000_000) if total_mbps else None
+
+
+def parse_guest_disk_usage(data: Any) -> tuple[int, int]:
+    entries = data
+    if isinstance(data, dict):
+        entries = pick(data, "result", "filesystems", "fsinfo", default=[])
+    if not isinstance(entries, list):
+        return 0, 0
+    used = 0
+    total = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        entry_total = non_negative_int(pick(entry, "total-bytes", "total_bytes", "total", default=0))
+        entry_used = non_negative_int(pick(entry, "used-bytes", "used_bytes", "used", default=0))
+        if entry_total > 0:
+            total += entry_total
+            used += min(entry_used, entry_total)
+    return used, total
+
+
 def percent(value: Any, scale: int = 1) -> int:
     try:
         return max(0, min(100, round(float(value or 0) * scale)))
@@ -391,3 +558,48 @@ def first_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return max(0.0, number)
+
+
+def task_datetime(value: Any) -> datetime | None:
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError):
+        return None
+    if timestamp <= 0:
+        return None
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+
+
+def describe_task(task_type: str, task_id: str | None) -> str:
+    normalized = task_type.casefold()
+    if normalized in {"vncproxy", "vncshell", "termproxy", "spiceproxy", "qmterminal", "vztermproxy"}:
+        return f"VM/CT {task_id} - Console" if task_id else "VM/CT - Console"
+    if normalized == "vzdump":
+        return "Backup Job"
+    if normalized == "aptupdate":
+        return "Update package database"
+    if normalized == "startall":
+        return "Start all VMs and Containers"
+    if normalized == "stopall":
+        return "Stop all VMs and Containers"
+
+    kind = "VM" if normalized.startswith("qm") else "CT" if normalized.startswith("vz") else ""
+    action_keys = {
+        "start": "Start",
+        "stop": "Stop",
+        "shutdown": "Shutdown",
+        "reboot": "Reboot",
+        "reset": "Reset",
+        "suspend": "Suspend",
+        "resume": "Resume",
+        "clone": "Clone",
+        "create": "Create",
+        "destroy": "Destroy",
+        "migrate": "Migrate",
+        "restore": "Restore",
+        "template": "Convert to template",
+    }
+    action = next((label for key, label in action_keys.items() if normalized == f"qm{key}" or normalized == f"vz{key}"), None)
+    if action:
+        return f"{kind} {task_id} - {action}" if task_id else f"{kind} - {action}"
+    return task_type if task_type != "unknown" else "Unknown task"

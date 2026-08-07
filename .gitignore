@@ -7,5 +7,7 @@ __pycache__/
 htmlcov/
 *.log
 .tmp-novnc/
+.local/
+.tmp-deploy.tar
 ip-cache.json
 config/ip-overrides.json

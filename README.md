@@ -189,6 +189,8 @@ O campo “Último backup” representa o último snapshot válido. Uma tentativ
 
 Nas VMs QEMU, o ícone de tela na coluna **Ações** abre o console noVNC por meio do próprio dashboard. O usuário informa suas credenciais do PVE no modal, o backend cria um ticket temporário e intermedeia a conexão WebSocket; o navegador não precisa acessar o endereço do PVE e nenhuma senha ou token é armazenado.
 
+Após a autenticação, o cabeçalho do console exibe os controles **Reboot**, **Stop** e **Start**, além do uso online da VM em CPU, RAM, disco e rede. As métricas são atualizadas automaticamente enquanto o console permanece aberto; a porcentagem de rede usa o limite `rate` configurado na interface da VM e, quando esse limite não existe, a taxa de entrada/saída continua sendo exibida sem inventar uma capacidade de referência.
+
 ```bash
 sudo systemctl restart proxmox-pbs-dashboard
 sudo journalctl -u proxmox-pbs-dashboard -f
